@@ -1,0 +1,46 @@
+# Model registry. Every model is trained on the train split only (no labels used by the
+# unsupervised models), and its alert threshold is calibrated on the validation split.
+
+feature_set: auth_window_v1
+
+features:
+  - n_events
+  - n_fail
+  - fail_ratio
+  - n_distinct_dst
+  - n_distinct_src
+  - n_remote
+  - n_novel_dst
+  - novel_dst_ratio
+  - n_novel_src
+  - n_novel_edge
+  - n_novel_auth_type
+  - n_post_fail_success
+  - ntlm_ratio
+  - max_burst
+  - z_events
+  - z_distinct_dst
+  - log_prior_windows
+
+threshold_policy:
+  # Alert budget: flag the top `alert_rate` fraction of validation windows. Labels are not
+  # used, because red-team annotations are incomplete and positives are extremely rare.
+  type: validation_alert_rate
+  alert_rate: 0.01
+
+models:
+  m0_robust_z:
+    kind: robust_z
+    display_name: "M0 · Robust z-score baseline"
+    features: [n_fail, n_novel_dst, n_novel_edge, z_events, z_distinct_dst]
+    params: { min_scale: 1.0 }
+
+  m1_isolation_forest:
+    kind: isolation_forest
+    display_name: "M1 · Isolation Forest"
+    features: all
+    params:
+      n_estimators: 300
+      max_samples: 256
+      max_features: 1.0
+      random_state: 42

@@ -1,0 +1,27 @@
+# Limitations
+
+1. **Synthetic results are not real-world results.** The author designed the fixture's
+   campaigns and benign look-alikes, so a detector built with knowledge of that design can
+   score well on it. The synthetic numbers show that the pipeline, evaluation and UI work end
+   to end, nothing more.
+2. **Real LANL data has not been run yet.** The importer follows the published schema and is
+   tested on LANL-format fixtures. Real files may hold surprises (encodings, unexpected tokens)
+   that the data-quality report will surface.
+3. **Labels are incomplete.** Unlabeled ≠ benign. Precision is a lower bound and recall covers
+   only documented activity. The LANL red-team file covers authentication events only.
+4. **Red-team key choice.** Matching uses the *source* principal by default. This is a
+   documented, configurable assumption.
+5. **Small positive counts** make AP and recall noisy. No confidence intervals yet.
+6. **Window granularity.** Alerts arrive at window end (up to 1 hour of latency by
+   construction). Attacks spread thinly across windows ("low and slow") are hard to detect at
+   this unit.
+7. **Explanations.** M0 explanations are exact. M1 explanations are proxy diagnostics, not
+   attributions.
+8. **Cold start.** New accounts and hosts look anomalous by construction (novelty features).
+   The warm-up period and `log_prior_windows` mitigate this but do not remove it.
+9. **No clock-time features.** LANL's epoch is unknown, so "off-hours" behavior is not
+   modeled, deliberately.
+10. **Single-process API** with in-memory rate limiting. That suits a portfolio demo, not a
+    multi-replica deployment.
+11. **Docker** files are written, but the image build has not been verified in this
+    environment.

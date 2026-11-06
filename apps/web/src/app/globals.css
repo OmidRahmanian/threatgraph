@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+/* Design tokens. Light values first; dark values for the OS setting and for an explicit
+   data-theme="dark" toggle (which must win both ways). Chart colors were checked with the
+   dataviz palette validator (CVD + contrast) on both surfaces. */
+:root {
+  color-scheme: light;
+  --bg: #f6f6f4;
+  --panel: #ffffff;
+  --panel-2: #f0f0ec;
+  --line: #e2e1dc;
+  --grid: #ebeae6;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-3: #6f6e69;
+  --model: #2a78d6; /* scores / unlabeled windows / model alerts */
+  --redteam: #eb6834; /* known red-team label - always this, nowhere else */
+  --model-soft: #e3effc;
+  --redteam-soft: #fde9e0;
+  --synthetic-bg: #fff4d6;
+  --synthetic-ink: #6b4a00;
+  --synthetic-line: #e8c46a;
+  --focus: #2a78d6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg: #111111;
+    --panel: #1a1a19;
+    --panel-2: #222221;
+    --line: #31312f;
+    --grid: #2a2a28;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --ink-3: #9d9c92;
+    --model: #3987e5;
+    --redteam: #d95926;
+    --model-soft: #16263a;
+    --redteam-soft: #36190d;
+    --synthetic-bg: #2e2508;
+    --synthetic-ink: #f3d27a;
+    --synthetic-line: #6b5414;
+    --focus: #6da7ec;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111111;
+  --panel: #1a1a19;
+  --panel-2: #222221;
+  --line: #31312f;
+  --grid: #2a2a28;
+  --ink: #f0efec;
+  --ink-2: #c3c2b7;
+  --ink-3: #9d9c92;
+  --model: #3987e5;
+  --redteam: #d95926;
+  --model-soft: #16263a;
+  --redteam-soft: #36190d;
+  --synthetic-bg: #2e2508;
+  --synthetic-ink: #f3d27a;
+  --synthetic-line: #6b5414;
+  --focus: #6da7ec;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-model: var(--model);
+  --color-redteam: var(--redteam);
+  --color-model-soft: var(--model-soft);
+  --color-redteam-soft: var(--redteam-soft);
+  --color-synthetic-bg: var(--synthetic-bg);
+  --color-synthetic-ink: var(--synthetic-ink);
+  --color-synthetic-line: var(--synthetic-line);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum" 1;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+input[type="range"] {
+  accent-color: var(--model);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fade-in {
+    animation: fade-in 240ms ease-out both;
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}

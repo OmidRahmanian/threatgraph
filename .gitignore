@@ -1,0 +1,35 @@
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Node / Next.js
+node_modules/
+apps/web/.next/
+apps/web/out/
+apps/web/next-env.d.ts
+apps/web/test-results/
+apps/web/playwright-report/
+*.tsbuildinfo
+
+# Data: raw LANL files must never be committed or redistributed.
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+# The synthetic fixture is regenerated deterministically from its seed.
+data/demo/raw/
+
+# Pipeline outputs (regenerate with `make demo`).
+artifacts/*
+!artifacts/.gitkeep
+apps/web/public/threatgraph-data/
+
+# Local secrets / env
+.env
+.env.local
+**/.export_salt
+.DS_Store

@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e ".[dev]"
+      - name: Lint & format
+        run: .venv/bin/ruff check . && .venv/bin/ruff format --check .
+      - name: Types
+        run: .venv/bin/mypy
+      - name: Tests (unit + integration)
+        run: .venv/bin/pytest
+      - name: Dependency audit (advisory)
+        continue-on-error: true
+        run: uv pip freeze --python .venv/bin/python | grep -v '^-e' > requirements-audit.txt && uvx pip-audit -r requirements-audit.txt
+
+  web:
+    runs-on: ubuntu-latest
+    needs: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e ".[dev]"
+      - name: Build the synthetic demo bundle
+        run: .venv/bin/python scripts/run_pipeline.py --dataset demo --seed 42
+      - working-directory: apps/web
+        run: npm ci
+      - working-directory: apps/web
+        run: npm run lint && npm run typecheck && npm test
+      - working-directory: apps/web
+        run: npm run build
+      - working-directory: apps/web
+        run: npx playwright install --with-deps chromium && npx playwright test
+      - name: npm audit (advisory)
+        continue-on-error: true
+        working-directory: apps/web
+        run: npm audit --audit-level=high

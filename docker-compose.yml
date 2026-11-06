@@ -1,0 +1,21 @@
+# Optional local services. Build the artifacts first: `make demo`.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      TG_DATASET: ${TG_DATASET:-demo}
+      TG_CORS_ORIGINS: http://localhost:8080
+    ports: ["8000:8000"]
+    volumes:
+      - ./data/processed:/app/data/processed:ro
+      - ./artifacts:/app/artifacts:ro
+    read_only: true
+    tmpfs: [/tmp]
+
+  web:
+    image: nginx:1.27-alpine
+    ports: ["8080:80"]
+    volumes:
+      - ./apps/web/out:/usr/share/nginx/html:ro
