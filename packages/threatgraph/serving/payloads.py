@@ -31,6 +31,7 @@ from threatgraph.pipeline import (
     predictions_path,
     quality_report_path,
     require,
+    require_fresh,
     scan_auth,
 )
 from threatgraph.provenance import LABEL_SEMANTICS
@@ -118,6 +119,9 @@ class ServingContext:
             metrics_path(cfg),
         ):
             require(p, hint)
+        # Serving results computed under another configuration would mislabel them.
+        require_fresh(graph_dir(cfg) / "graph_manifest.json", cfg, "graph")
+        require_fresh(metrics_path(cfg), cfg, "evaluate", mcfg)
 
     # ------------------------------------------------------------------ cached inputs
     @cached_property
@@ -449,8 +453,10 @@ class ServingContext:
             # Keep every row scoring strictly above the (cap+1)-th score, so no tie is split.
             exact_above = float(part[col].sort(descending=True)[SCORE_TABLE_MAX_ROWS])
             kept = part.filter(pl.col(col) > exact_above)
+        # Full precision: the browser compares these to the calibrated threshold, which is
+        # itself a validation score, so rounding can drop the window that sits exactly on it.
         rows = [
-            (self.window_id(p, ws), round(float(sc), 6), int(lab))
+            (self.window_id(p, ws), float(sc), int(lab))
             for p, ws, sc, lab in kept.select(
                 "src_principal", "window_start", col, "label"
             ).iter_rows()

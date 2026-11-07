@@ -39,6 +39,10 @@ class MissingInputError(RuntimeError):
     """Raised when a stage's inputs do not exist yet (with an actionable message)."""
 
 
+class StaleInputError(MissingInputError):
+    """Raised when a stage's inputs were built under a different configuration."""
+
+
 # ----------------------------------------------------------------------------- paths
 def features_path(cfg: DatasetConfig) -> Path:
     return cfg.processed_path / "features" / "windows.parquet"
@@ -82,6 +86,86 @@ def require(path: Path, hint: str) -> Path:
     return path
 
 
+# ----------------------------------------------------------------------------- freshness
+# Each stage records which configuration its output was built from: one hash per config
+# section the output depends on, plus the fingerprint of its upstream stage. Downstream stages
+# refuse inputs whose record differs from what the current configuration expects, so editing
+# (say) the split days can never silently reuse features with the old split column.
+# Settings that do not change outputs (ingest block size, feature chunk size) are left out.
+# Replacing raw files without changing the config is not detected: re-run ingest after that.
+STAGES = ("ingest", "features", "graph", "train", "evaluate")
+RERUN = {
+    "ingest": "scripts/ingest_lanl.py (or run_pipeline.py)",
+    "features": "scripts/build_features.py",
+    "graph": "scripts/build_graph.py",
+    "train": "scripts/train.py",
+    "evaluate": "scripts/evaluate.py",
+}
+_EVAL_ONLY = {"uncertainty", "ablations", "supervised_gate"}
+
+
+def fingerprint_inputs(
+    cfg: DatasetConfig, stage: str, mcfg: ModelsConfig | None = None
+) -> dict[str, str]:
+    h = config_hash
+    if stage == "ingest":
+        return {
+            "source": h({"mode": cfg.mode, "raw_dir": cfg.raw_dir, "files": cfg.files}),
+            "time_window": h(cfg.time_window),
+            "redteam": h(cfg.redteam),
+        }
+    features = h(cfg.features.model_dump(mode="json", exclude={"chunk_seconds"}))
+    if stage == "features":
+        return {"ingest": fingerprint(cfg, "ingest"), "features": features, "splits": h(cfg.splits)}
+    if stage == "graph":
+        return {"ingest": fingerprint(cfg, "ingest"), "features": features, "graph": h(cfg.graph)}
+    if mcfg is None:
+        raise ValueError(f"stage {stage} needs the models config")
+    if stage == "train":
+        return {
+            "features": fingerprint(cfg, "features"),
+            "models": h(mcfg.model_dump(mode="json", exclude=_EVAL_ONLY)),
+            "seed": h({"seed": cfg.seed}),
+        }
+    if stage == "evaluate":
+        return {
+            "train": fingerprint(cfg, "train", mcfg),
+            "evaluation": h(mcfg.model_dump(mode="json", include=_EVAL_ONLY)),
+        }
+    raise ValueError(stage)
+
+
+def fingerprint(cfg: DatasetConfig, stage: str, mcfg: ModelsConfig | None = None) -> str:
+    return config_hash(fingerprint_inputs(cfg, stage, mcfg))
+
+
+def require_fresh(
+    record: Path, cfg: DatasetConfig, stage: str, mcfg: ModelsConfig | None = None
+) -> Path:
+    """Fail unless `record` (a stage's manifest) matches what the current config expects."""
+    hint = f"Run {RERUN[stage]} first."
+    require(record, hint)
+    expected = fingerprint_inputs(cfg, stage, mcfg)
+    found = json.loads(record.read_text()).get("fingerprint_inputs") or {}
+    if found != expected:
+        changed = sorted(k for k in expected if found.get(k) != expected[k]) or ["unknown"]
+        how = "changed: " + ", ".join(changed) if found else "written before fingerprints existed"
+        raise StaleInputError(
+            f"{record} was built for a different configuration ({how}). "
+            f"Re-run {RERUN[stage]} and the stages after it."
+        )
+    return record
+
+
+def _stamp(cfg: DatasetConfig, stage: str, mcfg: ModelsConfig | None = None) -> dict[str, Any]:
+    inputs = fingerprint_inputs(cfg, stage, mcfg)
+    return {"fingerprint": config_hash(inputs), "fingerprint_inputs": inputs}
+
+
+def train_manifest_path(cfg: DatasetConfig) -> Path:
+    return cfg.artifacts_path / "models" / "train_manifest.json"
+
+
 # ----------------------------------------------------------------------------- run log
 @contextmanager
 def stage_run(cfg: DatasetConfig, name: str, mcfg: ModelsConfig | None = None):
@@ -119,6 +203,7 @@ def run_ingest(cfg: DatasetConfig) -> dict[str, Any]:
             "dataset": cfg.name,
             "mode": cfg.mode,
             "config_hash": config_hash(cfg),
+            **_stamp(cfg, "ingest"),
             "time_window": cfg.time_window.model_dump(),
             "auth": auth_report,
             "redteam": rt_report,
@@ -134,6 +219,7 @@ def run_features(cfg: DatasetConfig) -> dict[str, Any]:
     require(
         labels_path(cfg), "Run scripts/build_features.py after ingesting (scripts/ingest_lanl.py)."
     )
+    require_fresh(quality_report_path(cfg), cfg, "ingest")
     with stage_run(cfg, "features") as rec:
         labels = pl.read_parquet(labels_path(cfg))
         feats = build_window_features(scan_auth(cfg), labels, cfg)
@@ -143,6 +229,7 @@ def run_features(cfg: DatasetConfig) -> dict[str, Any]:
         manifest = {
             "dataset": cfg.name,
             "config_hash": config_hash(cfg),
+            **_stamp(cfg, "features"),
             "scoring_unit": "(src_principal, window)",
             "window_seconds": cfg.features.window_seconds,
             "burst_seconds": cfg.features.burst_seconds,
@@ -160,6 +247,7 @@ def run_features(cfg: DatasetConfig) -> dict[str, Any]:
 
 def run_graph(cfg: DatasetConfig) -> dict[str, Any]:
     require(labels_path(cfg), "Run scripts/ingest_lanl.py (or run_pipeline.py) first.")
+    require_fresh(quality_report_path(cfg), cfg, "ingest")
     with stage_run(cfg, "graph") as rec:
         out = graph_dir(cfg)
         labels = pl.read_parquet(labels_path(cfg))
@@ -168,6 +256,7 @@ def run_graph(cfg: DatasetConfig) -> dict[str, Any]:
         manifest = {
             "dataset": cfg.name,
             "config_hash": config_hash(cfg),
+            **_stamp(cfg, "graph"),
             "scope": "non-LogOff events of in-scope principals with both computers recorded",
             "principal_scope": cfg.features.principals,
             "edge_unit": "(window, principal, source computer, destination computer)",
@@ -187,6 +276,7 @@ def _matrix(df: pl.DataFrame, features: list[str]) -> np.ndarray:
 
 def run_train(cfg: DatasetConfig, mcfg: ModelsConfig) -> dict[str, Any]:
     require(features_path(cfg), "Run scripts/build_features.py first.")
+    require_fresh(features_path(cfg).parent / "feature_manifest.json", cfg, "features")
     with stage_run(cfg, "train", mcfg) as rec:
         feats = pl.read_parquet(features_path(cfg))
         scored = feats.filter(pl.col("split").is_in(["train", "validation", "test"]))
@@ -235,6 +325,10 @@ def run_train(cfg: DatasetConfig, mcfg: ModelsConfig) -> dict[str, Any]:
             preds = preds.with_columns(pl.Series(f"score__{model_id}", scores))
             summaries[model_id] = model.save(model_dir(cfg, model_id))
         preds.write_parquet(predictions_path(cfg))
+        write_json(
+            train_manifest_path(cfg),
+            {"dataset": cfg.name, "models": list(summaries), **_stamp(cfg, "train", mcfg)},
+        )
         rec["models"] = list(summaries)
     return summaries
 
@@ -248,12 +342,14 @@ def load_models(cfg: DatasetConfig, mcfg: ModelsConfig) -> dict[str, AnomalyMode
 
 def run_evaluate(cfg: DatasetConfig, mcfg: ModelsConfig) -> dict[str, Any]:
     require(predictions_path(cfg), "Run scripts/train.py first.")
+    require_fresh(train_manifest_path(cfg), cfg, "train", mcfg)
     with stage_run(cfg, "evaluate", mcfg):
         preds = pl.read_parquet(predictions_path(cfg))
         models = load_models(cfg, mcfg)
         bounds = cfg.splits.boundaries_seconds()
         result: dict[str, Any] = {
             "provenance": provenance_block(cfg.name, cfg.mode, config_hash(cfg, mcfg)),
+            **_stamp(cfg, "evaluate", mcfg),
             "evaluation_assumptions": EVALUATION_ASSUMPTIONS,
             "split_boundaries_seconds": {s: list(bounds[s]) for s in ("train", *EVAL_SPLITS)},
             "models": {},
@@ -450,6 +546,11 @@ def write_benchmark_report(
             "|---|---:|---:|---:|---:|---:|---:|",
         ]
         for m, f in faith:
+            if not f["estimable"]:
+                lines.append(
+                    f"| {metrics['models'][m]['display_name']} | {f['n_alerts']} | — | "
+                    "not estimable | | | |"
+                )
             for r in f["results"]:
                 lines.append(
                     f"| {metrics['models'][m]['display_name']} | {f['n_alerts']} | {r['k']} | "

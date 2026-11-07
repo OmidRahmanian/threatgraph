@@ -9,6 +9,16 @@ import { Callout, ErrorBlock, LoadingBlock, Panel, ProvenanceBadge, SectionTitle
 export function FaithfulnessPanel({ metrics }: { metrics: ModelMetrics }) {
   const f = metrics.explanation_faithfulness;
   if (!f) return null;
+  if (!f.estimable) {
+    return (
+      <Panel id="faithfulness">
+        <SectionTitle title="Explanation faithfulness" subtitle="Not estimable for this model." />
+        <p className="text-sm text-ink-2" data-testid="faithfulness-not-estimable">
+          {f.note}
+        </p>
+      </Panel>
+    );
+  }
   return (
     <Panel id="faithfulness">
       <SectionTitle

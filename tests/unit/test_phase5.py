@@ -9,7 +9,7 @@ import pytest
 from threatgraph.config import ThresholdPolicy
 from threatgraph.ml.drift import _edges, drift_report, psi
 from threatgraph.ml.faithfulness import deletion_test
-from threatgraph.ml.models import RobustZModel
+from threatgraph.ml.models import IsolationForestModel, RobustZModel
 from threatgraph.ml.uncertainty import account_bootstrap
 
 RNG = np.random.default_rng(0)
@@ -76,3 +76,18 @@ def test_deletion_test_ranks_exact_explanations_above_random() -> None:
     # M0's score is the max z, so removing the top feature always helps at least as much.
     assert r["mean_score_drop_top"] >= r["mean_score_drop_random"]
     assert r["below_threshold_share_top"] >= r["below_threshold_share_random"]
+
+
+@pytest.mark.parametrize("kind", ["robust_z", "isolation_forest"])
+def test_deletion_test_with_no_alerts_is_not_estimable(kind) -> None:
+    feats = ["n_events", "n_fail", "n_novel_dst", "n_remote"]
+    X = RNG.poisson([5, 0.2, 0.1, 2], size=(300, 4)).astype(float)
+    if kind == "robust_z":
+        m = RobustZModel("m0", "M0", feats, {"min_scale": 1.0})
+    else:
+        m = IsolationForestModel("m1", "M1", feats, {"n_estimators": 20, "random_state": 0})
+    m.fit(X)
+    m.calibrate_threshold(m.score(X), ThresholdPolicy(alert_rate=0.05))
+    out = deletion_test(m, X[:0])
+    assert out["estimable"] is False and out["results"] == [] and out["n_alerts"] == 0
+    assert "No test window" in out["note"]

@@ -55,6 +55,13 @@ artifacts/<ds>/metrics.json · reports/evaluation.md · runs/<stage>.json (time,
   with a memory cap, so they never load into Python memory.
 - **One payload layer** (`serving/payloads.py`) feeds both the API and the static export. An
   integration test asserts that API responses equal the exported JSON.
+- **Stale inputs are refused.** Each stage records a fingerprint of the config sections its
+  output depends on, plus its upstream stage's fingerprint (`pipeline.fingerprint_inputs`).
+  Training, evaluation, the API and the exporter refuse inputs built under a different
+  configuration and name the changed section (for example, editing the split days requires
+  re-running features, because the split column is computed there). Settings that cannot
+  change outputs, such as chunk and block sizes, are left out. Replacing raw files without
+  changing the config is not detected, so re-run ingest after that.
 - **Static export** lets the site be dropped into any existing personal website, optionally
   under a sub-path. Setting `NEXT_PUBLIC_TG_API_BASE` switches it to the live API with no
   code change.

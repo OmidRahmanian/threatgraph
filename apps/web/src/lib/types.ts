@@ -189,6 +189,8 @@ export interface Faithfulness {
   n_alerts: number;
   n_random_draws: number;
   seed: number;
+  estimable: boolean;
+  note: string | null;
   results: {
     k: number;
     mean_score_drop_top: number;

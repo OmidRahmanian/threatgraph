@@ -69,18 +69,24 @@ def test_chronological_splits_and_no_test_leakage(built) -> None:
         assert meta["threshold_policy"]["calibrated_on"] == "validation"
 
 
-def test_score_table_reproduces_stored_operating_point(built) -> None:
-    """What the browser slider does: recompute metrics from persisted scores."""
-    _, mcfg, ctx, *_ = built
+@pytest.mark.parametrize("split", ["validation", "test"])
+def test_score_table_reproduces_stored_operating_point(built, split) -> None:
+    """What the browser slider does: recompute metrics from exported scores, after JSON."""
+    _, mcfg, ctx, bundle, _ = built
+    out = Path(bundle["out_dir"])
     for model_id in mcfg.models:
-        table = ctx.score_table(model_id, "test")
-        y = np.array([r[2] for r in table.rows])
-        s = np.array([r[1] for r in table.rows])
-        stored = ctx.model_metrics(model_id).splits["test"].operating_point
-        recomputed = threshold_counts(y, s, table.calibrated_threshold)
-        # Scores are rounded to 6 decimals in the table; counts must still agree.
-        assert recomputed["alerts"] == stored.alerts
+        table = json.loads((out / f"models/{model_id}/scores/{split}.json").read_text())
+        y = np.array([r[2] for r in table["rows"]])
+        s = np.array([r[1] for r in table["rows"]])
+        stored = ctx.model_metrics(model_id).splits[split].operating_point
+        recomputed = threshold_counts(y, s, table["calibrated_threshold"])
+        assert recomputed["alerts"] == stored.alerts, (model_id, split)
         assert recomputed["known_positive_alerts"] == stored.known_positive_alerts
+        # Exported scores are the stored scores, bit for bit.
+        part = ctx.predictions.filter(pl.col("split") == split).sort(
+            "window_start", "src_principal"
+        )
+        assert s.tolist() == part[f"score__{model_id}"].to_list()
 
 
 def test_api_matches_static_export(built) -> None:
@@ -115,6 +121,64 @@ def test_api_matches_static_export(built) -> None:
         assert r.status_code == 200, url
         assert r.json() == json.loads((out / rel).read_text()), rel
     assert bundle["total_bytes"] < MAX_BUNDLE_BYTES
+
+
+def test_stale_inputs_are_refused(built) -> None:
+    """Editing the config after a run can never mix old artifacts with new metadata."""
+    cfg, mcfg, *_ = built
+    splits = cfg.splits.model_copy(update={"train_end_day": cfg.splits.train_end_day - 1})
+    moved = cfg.model_copy(update={"splits": splits})
+    # The reviewer's case: features carry the old split column, so training must refuse them.
+    with pytest.raises(pipeline.StaleInputError, match="changed: splits"):
+        pipeline.run_train(moved, mcfg)
+    with pytest.raises(pipeline.StaleInputError):
+        ServingContext(moved, mcfg)
+    # Evaluation-only settings invalidate metrics but not the trained models.
+    n_boot = mcfg.uncertainty.model_copy(update={"n_boot": mcfg.uncertainty.n_boot + 1})
+    boot = mcfg.model_copy(update={"uncertainty": n_boot})
+    pipeline.require_fresh(pipeline.train_manifest_path(cfg), cfg, "train", boot)
+    with pytest.raises(pipeline.StaleInputError, match="changed: evaluation"):
+        ServingContext(cfg, boot)
+    # Settings that cannot change outputs do not invalidate anything.
+    chunked = cfg.model_copy(
+        update={"features": cfg.features.model_copy(update={"chunk_seconds": 3600})}
+    )
+    ServingContext(chunked, mcfg)
+
+
+def test_zero_alerts_evaluate_to_not_estimable(built, tmp_path, monkeypatch) -> None:
+    """A threshold no window reaches is a valid outcome: no crash, no NaN, explicit results."""
+    import shutil
+
+    cfg, mcfg, *_ = built
+    art = tmp_path / "artifacts"
+    shutil.copytree(cfg.artifacts_path, art)
+    quiet = cfg.model_copy(update={"artifacts_dir": str(art)})
+    real = pipeline.load_models
+    preds = pl.read_parquet(pipeline.predictions_path(cfg))
+
+    def unreachable(c, m):
+        models = real(c, m)
+        for mid, model in models.items():
+            model.threshold = float(preds[f"score__{mid}"].max()) + 1.0
+        return models
+
+    monkeypatch.setattr(pipeline, "load_models", unreachable)
+    result = pipeline.run_evaluate(quiet, mcfg)
+
+    def no_nan(token: str) -> float:
+        raise AssertionError(f"metrics.json contains {token}")
+
+    json.loads(pipeline.metrics_path(quiet).read_text(), parse_constant=no_nan)
+    for m in mcfg.models:
+        test = result["models"][m]["splits"]["test"]
+        assert test["operating_point"]["alerts"] == 0
+        assert test["operating_point"]["precision_lower_bound"] is None
+        faith = result["models"][m]["explanation_faithfulness"]
+        assert faith["estimable"] is False and faith["results"] == []
+    monkeypatch.undo()
+    served = ServingContext(quiet, mcfg)
+    assert served.model_metrics(M1).explanation_faithfulness.estimable is False
 
 
 def test_every_payload_is_labeled_synthetic(built) -> None:

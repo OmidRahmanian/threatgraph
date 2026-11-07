@@ -132,7 +132,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def ctx() -> ServingContext:
         c = state.get("ctx")
         if not isinstance(c, ServingContext):
-            raise HTTPException(503, "artifacts not built; run scripts/run_pipeline.py")
+            raise HTTPException(
+                503,
+                "artifacts missing or built for a different configuration; "
+                "run scripts/run_pipeline.py",
+            )
         return c
 
     @app.get("/api/v1/health", response_model=S.Health)

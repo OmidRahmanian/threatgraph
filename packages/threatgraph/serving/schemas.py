@@ -234,6 +234,8 @@ class Faithfulness(BaseModel):
     n_alerts: int
     n_random_draws: int
     seed: int
+    estimable: bool
+    note: str | None
     results: list[FaithfulnessResult]
 
 

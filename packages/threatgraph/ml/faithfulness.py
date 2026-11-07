@@ -6,6 +6,9 @@ what drives the score, this should lower the score more than resetting k randoml
 features does (averaged over random draws), and more often push the window below the
 threshold. M0's explanation is exact by construction, so it serves as a reference; for
 Isolation Forest the explanation is a proxy, and this measures how good a proxy it is.
+
+With no alerts there is nothing to explain: the result says so (`estimable: false`) instead
+of averaging an empty set.
 """
 
 from __future__ import annotations
@@ -26,6 +29,20 @@ def deletion_test(
     seed: int = 42,
 ) -> dict[str, Any]:
     assert model.threshold is not None and model.ref_median is not None
+    meta = {
+        "method": "deletion test: reset the explanation's top-k features to training medians",
+        "split": "test",
+        "n_alerts": int(X.shape[0]),
+        "n_random_draws": n_random,
+        "seed": seed,
+    }
+    if X.shape[0] == 0:
+        return {
+            **meta,
+            "estimable": False,
+            "note": "No test window reached the threshold, so there are no explanations to test.",
+            "results": [],
+        }
     rng = np.random.default_rng(seed)
     base = model.score(X)
     n_feat = X.shape[1]
@@ -59,11 +76,4 @@ def deletion_test(
                 "top_beats_random_share": float(np.mean(np.array(top_drop) > np.array(rand_drop))),
             }
         )
-    return {
-        "method": "deletion test: reset the explanation's top-k features to training medians",
-        "split": "test",
-        "n_alerts": int(X.shape[0]),
-        "n_random_draws": n_random,
-        "seed": seed,
-        "results": results,
-    }
+    return {**meta, "estimable": True, "note": None, "results": results}

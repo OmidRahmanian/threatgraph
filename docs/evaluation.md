@@ -57,6 +57,10 @@ checks that the UI displays it.
 - The drift monitor (`ml/drift.py`, `artifacts/<ds>/drift.json`, Lab panel) reports PSI per
   feature and score per day against the train split, plus the daily alert rate.
 - Explanation faithfulness is measured by a deletion test (`ml/faithfulness.py`), reported
-  in `evaluation.md` and the Lab.
+  in `evaluation.md` and the Lab. With no test alerts it is reported as not estimable
+  rather than averaged over an empty set; precision is likewise `null`, not 0 or NaN.
+- Exported score tables keep full float precision. The threshold is itself a validation
+  score, so rounding could drop the window that sits exactly on it, and the Lab would then
+  disagree with the stored metrics. A test checks both splits after JSON round-tripping.
 - Synthetic results show the pipeline works. They do not measure real-world detection
   performance.
