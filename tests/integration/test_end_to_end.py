@@ -15,7 +15,8 @@ from threatgraph import pipeline
 from threatgraph.config import load_models_config
 from threatgraph.data.synthetic import SyntheticSpec, generate_fixture
 from threatgraph.ml.metrics import threshold_counts
-from threatgraph.serving.export import export_bundle
+from threatgraph.serving import payloads
+from threatgraph.serving.export import MAX_BUNDLE_BYTES, export_bundle, static_slug
 from threatgraph.serving.payloads import ServingContext
 from threatgraph_api.main import Settings, create_app
 
@@ -30,6 +31,7 @@ def built(tmp_path_factory: pytest.TempPathFactory):
     generate_fixture(cfg.raw_path, SyntheticSpec(seed=42))
     pipeline.run_ingest(cfg)
     pipeline.run_features(cfg)
+    pipeline.run_graph(cfg)
     pipeline.run_train(cfg, mcfg)
     pipeline.run_evaluate(cfg, mcfg)
     ctx = ServingContext(cfg, mcfg, public_ids=True)
@@ -91,11 +93,20 @@ def test_api_matches_static_export(built) -> None:
         f"models/{M1}/scores/test.json": f"/api/v1/models/{M1}/scores?split=test",
         f"models/{M1}/predictions/test.json": f"/api/v1/models/{M1}/predictions?split=test&limit=100",
     }
+    index = json.loads((out / "graph/windows/test/index.json").read_text())
+    wid = index["windows"][0]["window_id"]
+    graph = json.loads((out / f"graph/windows/{static_slug(wid)}.json").read_text())
+    eid = graph["graph"]["nodes"][0]["node_id"]
+    routes |= {
+        "graph/windows/test/index.json": "/api/v1/graph/windows?split=test",
+        f"graph/windows/{static_slug(wid)}.json": f"/api/v1/graph/windows/{wid}",
+        f"entities/{static_slug(eid)}.json": f"/api/v1/entities/{eid}",
+    }
     for rel, url in routes.items():
         r = client.get(url)
         assert r.status_code == 200, url
         assert r.json() == json.loads((out / rel).read_text()), rel
-    assert bundle["total_bytes"] < 5 * 1024 * 1024
+    assert bundle["total_bytes"] < MAX_BUNDLE_BYTES
 
 
 def test_every_payload_is_labeled_synthetic(built) -> None:
@@ -145,3 +156,71 @@ def test_api_validation_and_errors(built) -> None:
     r = client.get("/api/v1/summary")
     assert "max-age" in r.headers["cache-control"]
     assert client.post("/api/v1/summary").status_code == 405
+
+
+def test_graph_edges_are_grounded_in_events(built) -> None:
+    """Every exported edge's evidence events belong to that edge, direction and time range."""
+    cfg, _, ctx, bundle, _ = built
+    out = Path(bundle["out_dir"])
+    index = json.loads((out / "graph/windows/test/index.json").read_text())
+    auth = pipeline.scan_auth(cfg).collect()
+    by_id = {r["event_id"]: r for r in auth.iter_rows(named=True)}
+    labeled = ctx.labeled_event_ids
+    known = [w for w in index["windows"] if w["label"] == "known_redteam"]
+    assert known, "the index must include every known red-team test window"
+    for w in index["windows"]:
+        g = json.loads((out / f"graph/windows/{static_slug(w['window_id'])}.json").read_text())
+        graph = g["graph"]
+        assert graph["start_seconds"] == w["window_start"]
+        assert graph["end_seconds"] == w["window_end"]
+        assert len(graph["edges"]) <= graph["max_edges"]
+        node_ids = {n["node_id"] for n in graph["nodes"]}
+        for e in graph["edges"]:
+            assert e["source"] in node_ids and e["target"] in node_ids
+            assert (e["hop"] == 1) == (e["principal_id"] == w["principal_id"])
+            assert e["sample_events"], e["edge_id"]
+            for ev in e["sample_events"]:
+                raw = by_id[ev["event_id"]]
+                assert raw["src_principal"] == e["principal"]
+                assert f"computer:{raw['src_computer']}" == e["source"]
+                assert f"computer:{raw['dst_computer']}" == e["target"]
+                assert graph["start_seconds"] <= raw["event_time_seconds"] < graph["end_seconds"]
+                assert ev["known_redteam"] == (ev["event_id"] in labeled)
+            if e["n_known_redteam"]:
+                assert any(ev["known_redteam"] for ev in e["sample_events"])
+        hop1_labeled = sum(e["n_known_redteam"] for e in graph["edges"] if e["hop"] == 1)
+        if not graph["truncated"]:
+            assert hop1_labeled == w["n_labeled_events"], w["window_id"]
+
+
+def test_score_table_cap_keeps_exact_counts_above_cutoff(built, monkeypatch) -> None:
+    _, _, ctx, *_ = built
+    full = ctx.score_table(M1, "test")
+    monkeypatch.setattr(payloads, "SCORE_TABLE_MAX_ROWS", 200)
+    capped = ctx.score_table(M1, "test")
+    assert capped.truncated and not full.truncated
+    assert capped.n_rows_total == len(full.rows) and len(capped.rows) <= 200
+    assert capped.n_known_positive_total == sum(r[2] for r in full.rows)
+    assert capped.exact_above is not None
+    assert all(r[1] > capped.exact_above for r in capped.rows)
+    # Every row above the cutoff is present, so threshold counts there are exact.
+    above = {r[0] for r in full.rows if r[1] > capped.exact_above}
+    assert above == {r[0] for r in capped.rows}
+
+
+def test_graph_api_bounds(built) -> None:
+    *_, client = built
+    index = client.get("/api/v1/graph/windows?split=test").json()
+    w = index["windows"][0]
+    ok = f"/api/v1/graph?entity={w['principal_id']}&start={w['window_start']}&end={w['window_end']}"
+    assert client.get(ok).status_code == 200
+    assert client.get(ok + "&hops=3").status_code == 422
+    assert client.get(ok + "&max_edges=1000").status_code == 422
+    too_long = f"/api/v1/graph?entity={w['principal_id']}&start=0&end={3 * 86_400}"
+    assert client.get(too_long).status_code == 422
+    assert client.get("/api/v1/graph?entity=principal:NOPE&start=0&end=10").status_code == 404
+    assert client.get("/api/v1/entities/computer:NOPE").status_code == 404
+    assert client.get("/api/v1/entities/badtype:C1").status_code == 422
+    capped = client.get(ok + "&hops=2&max_edges=3").json()
+    assert len(capped["edges"]) <= 3
+    assert capped["n_edges_total"] >= len(capped["edges"])

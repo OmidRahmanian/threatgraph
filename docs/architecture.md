@@ -14,9 +14,13 @@ data/processed/<ds>/redteam.parquet
 data/processed/<ds>/labels.parquet                      (event_id → red-team record, multiplicity)
 data/processed/<ds>/reports/data_quality.json           (counts, missingness, duplicates, distincts)
    │
-   ▼  build_window_features (Polars lazy)
+   ▼  build_window_features (Polars, time chunks with carried state)
 data/processed/<ds>/features/windows.parquet            (one row per principal × window)
 data/processed/<ds>/features/feature_manifest.json
+   │
+   ├─▶ build graph (same chunks)
+   │   data/processed/<ds>/graph/edges/*.parquet         (window × account × src → dst)
+   │   data/processed/<ds>/graph/{entities,links}.parquet
    │
    ▼  train (fit on train split; calibrate on validation)
 artifacts/<ds>/models/<model_id>/{model.joblib, metadata.json}
@@ -36,10 +40,17 @@ artifacts/<ds>/metrics.json · reports/evaluation.md · runs/<stage>.json (time,
 ## Why these choices
 
 - **Batch first, serve small.** Heavy work (parsing, features, training) happens offline. The
-  public site only reads a bundle of about 1.5 MB, so it never trains or scans raw data.
+  public site only reads a static bundle (capped at 8 MB, 1 MB per file, fetched lazily per
+  page), so it never trains or scans raw data.
 - **pyarrow streaming + Polars.** Ingest memory is bounded by the block size, not the file size.
   The real `auth.txt.gz` is about 7 GB compressed and roughly 1 billion rows. When the file is
   time-sorted and the window has an end, ingest stops early.
+- **Chunked features and graph.** Features and graph tables are built in time chunks
+  (`features.chunk_seconds`). First-seen sets, last outcomes and recent arrivals are carried
+  between chunks, so output does not depend on chunk size and peak memory follows one chunk
+  plus the window table (`docs/real_data.md`).
+- **Precomputed graph tables.** Graph queries read a per-window edge table sorted by time
+  instead of raw events, so a bounded subgraph query takes tens of milliseconds on the demo.
 - **DuckDB** computes whole-table statistics (distincts, duplicates) over the Parquet files
   with a memory cap, so they never load into Python memory.
 - **One payload layer** (`serving/payloads.py`) feeds both the API and the static export. An

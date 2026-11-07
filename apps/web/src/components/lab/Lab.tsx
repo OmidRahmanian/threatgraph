@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { api, useLoad } from "@/lib/data";
 import { duration, int, ratio, relTime, score as fmtScore } from "@/lib/format";
 import { rankRows, thresholdLadder, thresholdMetrics } from "@/lib/threshold";
-import type { EvalSplit, Metadata, ModelInfo, ModelMetrics, ScoreRow, ScoreTable } from "@/lib/types";
+import type { Ablation, EvalSplit, Metadata, ModelInfo, ModelMetrics, ScoreRow, ScoreTable } from "@/lib/types";
 import {
   AlertBadge,
   Callout,
@@ -63,6 +63,10 @@ export function Lab() {
         <ComparisonTable models={models.models} />
       </Panel>
 
+      {models.ablations.map((a) => (
+        <AblationPanel key={a.ablation_id} ablation={a} models={models.models} />
+      ))}
+
       <div className="flex flex-wrap items-center gap-3">
         <Segmented
           label="Model"
@@ -118,6 +122,54 @@ function ComparisonTable({ models }: { models: ModelInfo[] }) {
   );
 }
 
+function AblationPanel({ ablation: a, models }: { ablation: Ablation; models: ModelInfo[] }) {
+  const name = (id: string) => models.find((m) => m.model_id === id)?.display_name ?? id;
+  return (
+    <Panel id="ablation">
+      <SectionTitle
+        title={a.title}
+        subtitle={
+          <>
+            {name(a.candidate)} adds {a.added_features.map((f) => <code key={f} className="mr-1 font-mono text-xs">{f}</code>)}
+            to {name(a.baseline)}; everything else (hyperparameters, seed, threshold policy) is the same.
+          </>
+        }
+      />
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[600px] text-left text-sm tabular-nums" data-testid="ablation-table">
+          <thead className="text-xs text-ink-3">
+            <tr>
+              <th className="py-1.5 pr-3 font-normal">Split</th>
+              <th className="py-1.5 pr-3 text-right font-normal">Known red-team windows</th>
+              <th className="py-1.5 pr-3 text-right font-normal">AP without graph features</th>
+              <th className="py-1.5 pr-3 text-right font-normal">AP with graph features</th>
+              <th className="py-1.5 pr-3 text-right font-normal">Change in AP</th>
+              <th className="py-1.5 pr-3 text-right font-normal">Recall without</th>
+              <th className="py-1.5 text-right font-normal">Recall with</th>
+            </tr>
+          </thead>
+          <tbody>
+            {a.splits.map((s) => (
+              <tr key={s.split} className="border-t border-line">
+                <td className="py-1.5 pr-3 text-ink-2">{s.split}</td>
+                <td className="py-1.5 pr-3 text-right">{s.n_positive_windows}</td>
+                <td className="py-1.5 pr-3 text-right">{ratio(s.baseline.average_precision)}</td>
+                <td className="py-1.5 pr-3 text-right">{ratio(s.candidate.average_precision)}</td>
+                <td className="py-1.5 pr-3 text-right">
+                  {s.average_precision_delta === null ? "n/e" : `${s.average_precision_delta >= 0 ? "+" : "−"}${Math.abs(s.average_precision_delta).toFixed(3)}`}
+                </td>
+                <td className="py-1.5 pr-3 text-right">{ratio(s.baseline.known_label_recall)}</td>
+                <td className="py-1.5 text-right">{ratio(s.candidate.known_label_recall)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-sm text-ink-2">{a.note}</p>
+    </Panel>
+  );
+}
+
 function ModelWorkspace({ model, meta }: { model: ModelInfo; meta: Metadata }) {
   const [split, setSplit] = useState<EvalSplit>("test");
   const data = useLoad(
@@ -164,11 +216,16 @@ function SplitWorkspace({
   table: ScoreTable;
   explained: Set<string> | "all";
 }) {
-  const [threshold, setThreshold] = useState(table.calibrated_threshold);
-  const [selected, setSelected] = useState<string | null>(null);
   const ladder = useMemo(() => thresholdLadder(table.rows), [table]);
+  // A truncated table is exact only above its cutoff; if the calibrated threshold lies below
+  // it, start at the lowest exact threshold instead (the stored metrics stay in the table above).
+  const calibratedExact = !table.truncated || table.exact_above === null || table.calibrated_threshold > table.exact_above;
+  const start = calibratedExact ? table.calibrated_threshold : (ladder.at(-1) ?? table.calibrated_threshold);
+  const [threshold, setThreshold] = useState(start);
+  const [selected, setSelected] = useState<string | null>(null);
   const ranked = useMemo(() => rankRows(table.rows), [table]);
-  const m = useMemo(() => thresholdMetrics(table.rows, threshold, table.n_days), [table, threshold]);
+  const totals = useMemo(() => ({ rows: table.n_rows_total, knownPositives: table.n_known_positive_total }), [table]);
+  const m = useMemo(() => thresholdMetrics(table.rows, threshold, table.n_days, totals), [table, threshold, totals]);
   const sm = metrics.splits[split];
 
   return (
@@ -176,10 +233,18 @@ function SplitWorkspace({
       <Panel>
         <SectionTitle
           title="Threshold explorer"
-          subtitle={`${int(table.rows.length)} ${split} windows · ${int(m.knownPositives)} known red-team · ${table.n_days} days`}
+          subtitle={`${int(table.n_rows_total)} ${split} windows · ${int(m.knownPositives)} known red-team · ${table.n_days} days`}
           right={<ProvenanceBadge provenance={table.provenance} />}
         />
-        <ThresholdPanel ladder={ladder} threshold={threshold} calibrated={table.calibrated_threshold} m={m} onChange={setThreshold} />
+        {table.truncated ? (
+          <p className="mb-4 text-xs text-ink-3" data-testid="score-table-truncated">
+            This split has {int(table.n_rows_total)} windows; the exported table holds the {int(table.rows.length)} highest scores
+            (all above {fmtScore(table.exact_above ?? 0)}). Every count below is exact, because the slider only reaches thresholds
+            above that cutoff.
+            {calibratedExact ? null : " The calibrated threshold lies below it; its stored metrics are in the comparison table."}
+          </p>
+        ) : null}
+        <ThresholdPanel ladder={ladder} threshold={threshold} calibrated={start} m={m} onChange={setThreshold} />
       </Panel>
 
       <div className="grid gap-6 lg:grid-cols-2">

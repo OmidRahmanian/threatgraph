@@ -43,12 +43,28 @@ class FeatureConfig(BaseModel):
     burst_seconds: int = Field(default=300, gt=0)
     baseline_windows: int = Field(default=24, gt=1)
     principals: Literal["users_only", "all"] = "users_only"
+    # Events are processed in time chunks of this size with carried state, so peak memory
+    # follows one chunk rather than the whole time window. Output does not depend on it.
+    chunk_seconds: int = Field(default=86_400, gt=0)
+    # A source computer counts as a pivot if the principal reached it as a remote
+    # destination within this many seconds before (graph feature `n_pivot_src`).
+    pivot_lookback_seconds: int = Field(default=86_400, gt=0)
 
     @model_validator(mode="after")
     def _check(self) -> FeatureConfig:
         if self.window_seconds % self.burst_seconds:
             raise ValueError("window_seconds must be a multiple of burst_seconds")
+        if self.chunk_seconds % self.window_seconds:
+            raise ValueError("chunk_seconds must be a multiple of window_seconds")
         return self
+
+
+class GraphConfig(BaseModel):
+    # Two-hop expansion skips computers used by more than this many principals in the
+    # requested range (domain controllers, file servers): they connect everyone to everyone.
+    hub_max_principals: int = Field(default=15, ge=1)
+    sample_events_per_edge: int = Field(default=3, ge=1, le=10)
+    export_max_edges: int = Field(default=60, ge=1, le=300)
 
 
 class SplitConfig(BaseModel):
@@ -84,6 +100,7 @@ class DatasetConfig(BaseModel):
     ingest: IngestConfig = IngestConfig()
     redteam: RedteamConfig = RedteamConfig()
     features: FeatureConfig = FeatureConfig()
+    graph: GraphConfig = GraphConfig()
     splits: SplitConfig
     seed: int = 42
 
@@ -118,8 +135,19 @@ class DatasetConfig(BaseModel):
 class ModelSpec(BaseModel):
     kind: Literal["robust_z", "isolation_forest"]
     display_name: str
-    features: list[str] | Literal["all"]
+    description: str | None = None
+    # A list of feature names, "all", or the name of a group in `feature_groups`.
+    features: list[str] | str
     params: dict[str, Any] = {}
+
+
+class AblationSpec(BaseModel):
+    """A pair of models that differ only in their inputs, compared on every split."""
+
+    title: str
+    baseline: str
+    candidate: str
+    note: str
 
 
 class ThresholdPolicy(BaseModel):
@@ -129,13 +157,36 @@ class ThresholdPolicy(BaseModel):
 
 class ModelsConfig(BaseModel):
     feature_set: str
-    features: list[str]
+    feature_groups: dict[str, list[str]]
     threshold_policy: ThresholdPolicy
     models: dict[str, ModelSpec]
+    ablations: dict[str, AblationSpec] = {}
+
+    @property
+    def features(self) -> list[str]:
+        return [f for group in self.feature_groups.values() for f in group]
 
     def features_for(self, model_id: str) -> list[str]:
         spec = self.models[model_id]
-        return list(self.features) if spec.features == "all" else list(spec.features)
+        if isinstance(spec.features, list):
+            return list(spec.features)
+        if spec.features == "all":
+            return self.features
+        return list(self.feature_groups[spec.features])
+
+    @model_validator(mode="after")
+    def _check(self) -> ModelsConfig:
+        for m, spec in self.models.items():
+            if isinstance(spec.features, str) and spec.features not in (
+                "all",
+                *self.feature_groups,
+            ):
+                raise ValueError(f"model {m}: unknown feature group '{spec.features}'")
+        for a, ab in self.ablations.items():
+            for m in (ab.baseline, ab.candidate):
+                if m not in self.models:
+                    raise ValueError(f"ablation {a}: unknown model '{m}'")
+        return self
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:

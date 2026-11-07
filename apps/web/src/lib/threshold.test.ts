@@ -44,6 +44,17 @@ describe("thresholdMetrics", () => {
   });
 });
 
+describe("truncated tables", () => {
+  it("uses the full-split totals, so counts above the cutoff stay exact", () => {
+    // Keep rows scoring above 0.3, as the exporter does when it caps a large split.
+    const kept = ROWS.filter((r) => r[1] > 0.3);
+    const totals = { rows: ROWS.length, knownPositives: 2 };
+    for (const t of [0.4, 0.8, 0.9]) {
+      expect(thresholdMetrics(kept, t, 2, totals)).toEqual(thresholdMetrics(ROWS, t, 2));
+    }
+  });
+});
+
 describe("ladder", () => {
   it("is distinct scores, descending", () => {
     expect(thresholdLadder(ROWS)).toEqual([0.9, 0.8, 0.4, 0.3, 0.2, 0.1, 0.0]);

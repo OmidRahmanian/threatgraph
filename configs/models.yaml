@@ -1,26 +1,32 @@
 # Model registry. Every model is trained on the train split only (no labels used by the
 # unsupervised models), and its alert threshold is calibrated on the validation split.
 
-feature_set: auth_window_v1
+feature_set: auth_window_v2
 
-features:
-  - n_events
-  - n_fail
-  - fail_ratio
-  - n_distinct_dst
-  - n_distinct_src
-  - n_remote
-  - n_novel_dst
-  - novel_dst_ratio
-  - n_novel_src
-  - n_novel_edge
-  - n_novel_auth_type
-  - n_post_fail_success
-  - ntlm_ratio
-  - max_burst
-  - z_events
-  - z_distinct_dst
-  - log_prior_windows
+feature_groups:
+  # Per-window behavior of one principal (Phase 1).
+  behavioral:
+    - n_events
+    - n_fail
+    - fail_ratio
+    - n_distinct_dst
+    - n_distinct_src
+    - n_remote
+    - n_novel_dst
+    - novel_dst_ratio
+    - n_novel_src
+    - n_novel_edge
+    - n_novel_auth_type
+    - n_post_fail_success
+    - ntlm_ratio
+    - max_burst
+    - z_events
+    - z_distinct_dst
+    - log_prior_windows
+  # Neighborhood and path structure of the authentication graph (Phase 3).
+  graph:
+    - n_rare_dst
+    - n_pivot_src
 
 threshold_policy:
   # Alert budget: flag the top `alert_rate` fraction of validation windows. Labels are not
@@ -38,9 +44,34 @@ models:
   m1_isolation_forest:
     kind: isolation_forest
     display_name: "M1 · Isolation Forest"
+    features: behavioral
+    params:
+      n_estimators: 300
+      max_samples: 256
+      max_features: 1.0
+      random_state: 42
+
+  m3_isolation_forest_graph:
+    kind: isolation_forest
+    display_name: "M3 · Isolation Forest + graph features"
+    description: >-
+      The same Isolation Forest as M1 (same hyperparameters and seed) with two graph features
+      added: destinations no other account had used before, and source computers the account
+      had itself just reached (two-hop pivots). Trained on the training split without labels.
     features: all
     params:
       n_estimators: 300
       max_samples: 256
       max_features: 1.0
       random_state: 42
+
+ablations:
+  graph_features:
+    title: "Graph-feature ablation: M1 vs M3"
+    baseline: m1_isolation_forest
+    candidate: m3_isolation_forest_graph
+    note: >-
+      M3 differs from M1 only by the graph feature group. On the synthetic demo this comparison
+      is not blind: the fixture's red-team campaigns were written to hop from host to host, and
+      the pivot feature was designed knowing that. A gain here shows the feature works as
+      intended on data built to contain pivots, not that it would help on real data.

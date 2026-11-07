@@ -12,7 +12,7 @@ test("overview shows computed stats with a synthetic badge", async ({ page }) =>
   await expect(page.getByText("Synthetic demo — no real network data on this page")).toBeVisible();
   await expect(page.getByTestId("stat-events")).toContainText(`${summary.rejected_source_rows} malformed rows rejected`);
   // Unbuilt views are labeled, not dead links.
-  await expect(page.getByText("Not built yet · Phase 3").first()).toBeVisible();
+  await expect(page.getByText("Not built yet · Phase 4").first()).toBeVisible();
 });
 
 test("navigation from overview to the lab", async ({ page }) => {
@@ -74,4 +74,13 @@ test("no horizontal page scroll", async ({ page }) => {
     const [sw, cw] = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
     expect(sw, path).toBeLessThanOrEqual(cw);
   }
+});
+
+test("the lab shows the graph-feature ablation from stored metrics", async ({ page }) => {
+  const ablation = read("models.json").ablations[0];
+  await page.goto("/threatgraph/lab/");
+  const table = page.getByTestId("ablation-table");
+  await expect(table).toBeVisible();
+  const test = ablation.splits.find((s: { split: string }) => s.split === "test");
+  await expect(table.locator("tbody tr").nth(1)).toContainText(test.candidate.average_precision.toFixed(3));
 });

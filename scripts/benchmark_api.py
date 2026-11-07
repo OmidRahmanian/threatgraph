@@ -42,7 +42,15 @@ def main() -> None:
             "predictions": f"/api/v1/models/{model}/predictions?limit=50",
             "explanation": f"/api/v1/models/{model}/explanations/{top}",
             "events_page": "/api/v1/events?limit=100",
+            "graph_window_2hop": f"/api/v1/graph/windows/{top}",
         }
+        graph = client.get(routes["graph_window_2hop"]).json()["graph"]
+        routes["entity_computer"] = f"/api/v1/entities/{graph['nodes'][0]['node_id']}"
+        w = client.get(routes["graph_window_2hop"]).json()["window"]
+        routes["graph_principal_24h"] = (
+            f"/api/v1/graph?entity={w['principal_id']}&start={w['window_start']}"
+            f"&end={w['window_start'] + 86_400}&hops=2&max_edges=300"
+        )
         for name, url in routes.items():
             client.get(url)  # warm caches
             times = []

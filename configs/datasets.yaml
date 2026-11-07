@@ -18,6 +18,7 @@ datasets:
     ingest: { block_size_bytes: 4194304, assume_sorted: true, hash_source_files: true }
     redteam: { user_field: source }
     features: { window_seconds: 3600, burst_seconds: 300, baseline_windows: 24, principals: users_only }
+    graph: { hub_max_principals: 15, sample_events_per_edge: 3, export_max_edges: 60 }
     splits: { warmup_end_day: 2, train_end_day: 8, validation_end_day: 11, test_end_day: 14 }
     seed: 42
 
@@ -39,6 +40,11 @@ datasets:
     time_window: { start_seconds: 0, end_seconds: 1209599 }
     ingest: { block_size_bytes: 67108864, assume_sorted: true, hash_source_files: false }
     redteam: { user_field: source }
-    features: { window_seconds: 3600, burst_seconds: 300, baseline_windows: 24, principals: users_only }
+    # One-hour chunks bound feature/graph memory (LANL has roughly 18M events per day).
+    # See docs/real_data.md for the scale rehearsal behind this choice.
+    features:
+      { window_seconds: 3600, burst_seconds: 300, baseline_windows: 24, principals: users_only,
+        chunk_seconds: 3600 }
+    graph: { hub_max_principals: 15, sample_events_per_edge: 3, export_max_edges: 60 }
     splits: { warmup_end_day: 2, train_end_day: 8, validation_end_day: 11, test_end_day: 14 }
     seed: 42

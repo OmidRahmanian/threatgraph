@@ -1,0 +1,63 @@
+{
+  "fixture": {
+    "kind": "synthetic demo replicated with renamed entities (not real data)",
+    "copies": 200,
+    "days": 4,
+    "events": 17204600,
+    "events_per_day": 4301150
+  },
+  "machine": {
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "python": "3.12.16"
+  },
+  "runs": [
+    {
+      "stage": "ingest",
+      "chunk_seconds": 3600,
+      "seconds": 22.5,
+      "peak_rss_mb": 2713,
+      "events": 17204400,
+      "rows_per_second": 1411321.6
+    },
+    {
+      "stage": "features",
+      "chunk_seconds": 86400,
+      "seconds": 16.6,
+      "peak_rss_mb": 2500,
+      "windows": 1359800
+    },
+    {
+      "stage": "features",
+      "chunk_seconds": 3600,
+      "seconds": 39.9,
+      "peak_rss_mb": 2082,
+      "windows": 1359800
+    },
+    {
+      "stage": "graph",
+      "chunk_seconds": 3600,
+      "seconds": 14.5,
+      "peak_rss_mb": 2047,
+      "edge_rows": 6069600
+    },
+    {
+      "stage": "train",
+      "chunk_seconds": 3600,
+      "seconds": 15.2,
+      "peak_rss_mb": 2222
+    },
+    {
+      "stage": "evaluate",
+      "chunk_seconds": 3600,
+      "seconds": 0.4,
+      "peak_rss_mb": 457
+    },
+    {
+      "stage": "export",
+      "chunk_seconds": 3600,
+      "seconds": 13.6,
+      "peak_rss_mb": 1103,
+      "bundle_bytes": 7552066
+    }
+  ]
+}

@@ -82,9 +82,29 @@ export interface ModelInfo {
   headline: HeadlineMetrics[];
 }
 
+export interface AblationSplit {
+  split: EvalSplit;
+  n_positive_windows: number;
+  baseline: HeadlineMetrics;
+  candidate: HeadlineMetrics;
+  average_precision_delta: number | null;
+}
+
+export interface Ablation {
+  ablation_id: string;
+  title: string;
+  baseline: string;
+  candidate: string;
+  added_features: string[];
+  removed_features: string[];
+  note: string;
+  splits: AblationSplit[];
+}
+
 export interface ModelList {
   provenance: Provenance;
   models: ModelInfo[];
+  ablations: Ablation[];
 }
 
 export interface ThresholdPoint {
@@ -147,6 +167,11 @@ export interface ScoreTable {
   calibrated_threshold: number;
   columns: string[];
   rows: ScoreRow[];
+  /** Large splits keep only the top rows; counts are exact for thresholds above `exact_above`. */
+  n_rows_total: number;
+  n_known_positive_total: number;
+  truncated: boolean;
+  exact_above: number | null;
 }
 
 export interface AuthEvent {
@@ -211,4 +236,143 @@ export interface Benchmarks {
   processed_bytes: Record<string, number>;
   export_payload_bytes: number | null;
   library_versions: Record<string, string>;
+}
+
+export interface EdgeEvent {
+  event_id: number;
+  event_time_seconds: number;
+  auth_type: string | null;
+  logon_type: string | null;
+  auth_orientation: string | null;
+  outcome: string | null;
+  known_redteam: boolean;
+}
+
+export interface GraphNode {
+  node_id: string;
+  label: string;
+  hop: number;
+  n_principals_in_range: number;
+  is_hub: boolean;
+  expanded: boolean;
+}
+
+export interface GraphEdge {
+  edge_id: string;
+  principal: string;
+  principal_id: string;
+  source: string;
+  target: string;
+  hop: number;
+  n_events: number;
+  n_success: number;
+  n_fail: number;
+  n_known_redteam: number;
+  n_windows: number;
+  first_event_seconds: number;
+  last_event_seconds: number;
+  auth_types: string[];
+  edge_first_seen_seconds: number;
+  first_observed_in_range: boolean;
+  is_local: boolean;
+  sample_events: EdgeEvent[];
+}
+
+export interface GraphPrincipal {
+  principal_id: string;
+  label: string;
+  hop: number;
+  n_edges: number;
+  n_events: number;
+  n_known_redteam: number;
+}
+
+export interface Subgraph {
+  provenance: Provenance;
+  focus: string;
+  start_seconds: number;
+  end_seconds: number;
+  hops: number;
+  max_edges: number;
+  hub_max_principals: number;
+  n_edges_total: number;
+  truncated: boolean;
+  truncation_order: string;
+  semantics: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  principals: GraphPrincipal[];
+}
+
+export interface WindowScore {
+  score: number;
+  threshold: number;
+  flagged: boolean;
+  rank: number;
+}
+
+export interface GraphWindowSummary {
+  window_id: string;
+  principal: string;
+  principal_id: string;
+  split: string;
+  window_start: number;
+  window_end: number;
+  day: number;
+  label: "known_redteam" | "unlabeled";
+  n_labeled_events: number;
+  scores: Record<string, WindowScore>;
+}
+
+export interface GraphWindowIndex {
+  provenance: Provenance;
+  split: string;
+  selection: string;
+  windows: GraphWindowSummary[];
+}
+
+export interface GraphWindow {
+  provenance: Provenance;
+  window: GraphWindowSummary;
+  graph: Subgraph;
+}
+
+export interface EntityLink {
+  entity_id: string;
+  label: string;
+  n_events: number;
+  n_known_redteam: number;
+  first_seen_seconds: number;
+  last_seen_seconds: number;
+}
+
+export interface EntityDetail {
+  provenance: Provenance;
+  entity_id: string;
+  entity_type: "principal" | "computer";
+  label: string;
+  scope: string;
+  first_seen_seconds: number;
+  last_seen_seconds: number;
+  n_events: number;
+  n_fail: number;
+  n_known_redteam_events: number;
+  n_active_windows: number | null;
+  n_distinct_src_computers: number | null;
+  n_distinct_dst_computers: number | null;
+  windows_by_split: { split: string; n_windows: number; n_known_positive_windows: number }[];
+  model_windows: {
+    model_id: string;
+    display_name: string;
+    split: string;
+    n_windows: number;
+    alerts: number;
+    top_windows: { window_id: string; window_start: number; score: number; flagged: boolean; known_redteam: boolean }[];
+  }[];
+  n_distinct_principals: number | null;
+  in_degree: number | null;
+  out_degree: number | null;
+  n_local_events: number | null;
+  top_links: EntityLink[];
+  n_links_total: number;
 }

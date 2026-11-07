@@ -52,13 +52,23 @@ heavy-tailed counts. Trained on the training split without labels. The score is
 UI shows each feature's robust z versus the training median and labels it an *approximate
 diagnostic*, not the model's reasoning.
 
+### M3 · Isolation Forest + graph features
+
+The same estimator, hyperparameters and seed as M1, with the `graph` feature group added
+(`n_rare_dst`, `n_pivot_src`; see `docs/graph.md`). Because only the inputs differ, M1 vs M3 is
+a clean ablation of the graph features. It is configured under `ablations:` in
+`configs/models.yaml`, reported in `artifacts/<ds>/reports/evaluation.md` and shown in the Lab.
+
+**Development disclosure.** The graph features were designed after the synthetic fixture,
+whose campaigns pivot from host to host. They were checked on the demo while being written,
+so the demo ablation is not blind. M0 and M1 were not changed: their metrics are identical
+before and after the graph features were added (verified when M3 was introduced).
+
 ### Not yet implemented
 
 - M2 (supervised, e.g. regularized logistic regression or XGBoost): only if the real-data
   split has enough positives. Train and validation positives would have to be disjoint in
   time, never a random event-level split.
-- M3 (graph-derived): temporal degree shifts and neighborhood risk, plus an ablation of graph
-  features. Phase 3.
 
 ## Threshold policy
 

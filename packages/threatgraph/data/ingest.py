@@ -207,7 +207,9 @@ def auth_glob(processed: Path) -> str:
 def _auth_table_stats(auth_dir: Path) -> dict[str, Any]:
     glob = str(auth_dir / "**" / "*.parquet")
     con = duckdb.connect()
-    con.execute("SET memory_limit='4GB'")
+    # Bounded memory: DuckDB spills the DISTINCT counts to disk next to the processed data.
+    con.execute("SET memory_limit='2GB'")
+    con.execute(f"SET temp_directory='{auth_dir.parent / '.duckdb_tmp'}'")
     src = f"read_parquet('{glob}', hive_partitioning=true)"
     row = con.execute(
         f"""

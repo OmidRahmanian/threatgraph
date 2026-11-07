@@ -8,9 +8,12 @@
 import { useEffect, useState } from "react";
 import type {
   Benchmarks,
+  EntityDetail,
   EvalSplit,
   Explanation,
   ExplanationBundle,
+  GraphWindow,
+  GraphWindowIndex,
   Metadata,
   ModelList,
   ModelMetrics,
@@ -24,12 +27,21 @@ const DATASET = process.env.NEXT_PUBLIC_TG_DATASET ?? "demo";
 const STATIC_BASE = `${BASE_PATH}/threatgraph-data/${DATASET}/v1`;
 
 export const dataSourceLabel = API_BASE ? "Live API" : "Static export";
+export const isLiveApi = Boolean(API_BASE);
+
+/** Static file name for an id: same rule as threatgraph.serving.export.static_slug. */
+export function staticSlug(id: string): string {
+  return id.replace(/[^A-Za-z0-9._-]/g, "_");
+}
+
+class NotFound extends Error {}
 
 const cache = new Map<string, Promise<unknown>>();
 
 async function getJson<T>(url: string): Promise<T> {
   if (!cache.has(url)) {
     const p = fetch(url).then(async (r) => {
+      if (r.status === 404) throw new NotFound(`404 for ${url}`);
       if (!r.ok) throw new Error(`${r.status} ${r.statusText} for ${url}`);
       return r.json();
     });
@@ -37,6 +49,16 @@ async function getJson<T>(url: string): Promise<T> {
     cache.set(url, p);
   }
   return cache.get(url) as Promise<T>;
+}
+
+/** Like getJson, but a missing resource (404) resolves to null. */
+async function getJsonOrNull<T>(url: string): Promise<T | null> {
+  try {
+    return await getJson<T>(url);
+  } catch (e) {
+    if (e instanceof NotFound) return null;
+    throw e;
+  }
 }
 
 function route(apiPath: string, staticFile: string): string {
@@ -60,6 +82,16 @@ export const api = {
     const bundle = await getJson<ExplanationBundle>(`${STATIC_BASE}/models/${id}/explanations/test.json`);
     return bundle.explanations[windowId] ?? null;
   },
+  graphIndex: (split: EvalSplit) =>
+    getJson<GraphWindowIndex>(route(`/graph/windows?split=${split}`, `graph/windows/${split}/index.json`)),
+  /** Resolves to null when the window has no graph (or the static export did not include it). */
+  graphWindow: (windowId: string) =>
+    getJsonOrNull<GraphWindow>(
+      route(`/graph/windows/${encodeURIComponent(windowId)}`, `graph/windows/${staticSlug(windowId)}.json`),
+    ),
+  /** Resolves to null when the static export did not include this entity (hop-2 entities). */
+  entity: (entityId: string) =>
+    getJsonOrNull<EntityDetail>(route(`/entities/${encodeURIComponent(entityId)}`, `entities/${staticSlug(entityId)}.json`)),
   explanationsAvailable: async (id: string, split: EvalSplit): Promise<Set<string> | "all"> => {
     if (API_BASE) return "all";
     if (split !== "test") return new Set();

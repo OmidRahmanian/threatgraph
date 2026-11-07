@@ -16,10 +16,13 @@ import polars as pl
 
 from threatgraph.config import DAY_SECONDS, DatasetConfig, ModelsConfig
 from threatgraph.data.features import FEATURE_DESCRIPTIONS, scoped_events
+from threatgraph.graph.build import edges_glob
+from threatgraph.graph.query import EntityType, subgraph
 from threatgraph.ml.models import AnomalyModel
 from threatgraph.pipeline import (
     EVAL_SPLITS,
     features_path,
+    graph_dir,
     labels_path,
     load_models,
     load_run_records,
@@ -50,8 +53,28 @@ MODEL_DESCRIPTIONS = {
         "without labels. Its score ranks unusualness; it is not a probability of compromise."
     ),
 }
-IMPLEMENTED_VIEWS = ["overview", "lab"]
+IMPLEMENTED_VIEWS = ["overview", "lab", "explorer"]
 MAX_EVIDENCE = 40
+# Per-split cap on exported/served score rows (real LANL splits can hold hundreds of thousands).
+SCORE_TABLE_MAX_ROWS = 10_000
+EXPLANATION_TOP_N = 40
+ENTITY_TOP_LINKS = 8
+ENTITY_TOP_WINDOWS = 3
+GRAPH_SEMANTICS = (
+    "Nodes are computers. A directed edge means the account authenticated from the source "
+    "computer to the destination computer, in the direction LANL records it. Edges aggregate "
+    "non-LogOff events of in-scope accounts (machine accounts excluded by default) per window. "
+    "Hop 2 adds other accounts' edges on hop-1 computers, except through hubs. Graph structure "
+    "is context for an analyst, not evidence of compromise."
+)
+TRUNCATION_ORDER = (
+    "hop, then edges first observed in the range, then failures, then event count "
+    "(red-team labels are not used to choose what is shown)"
+)
+ENTITY_SCOPE = (
+    "Counts cover the processed time window and the graph scope: non-LogOff events of in-scope "
+    "accounts with both computers recorded."
+)
 
 
 class NotFoundError(KeyError):
@@ -73,6 +96,7 @@ class ServingContext:
         for p in (
             quality_report_path(cfg),
             features_path(cfg),
+            graph_dir(cfg) / "graph_manifest.json",
             predictions_path(cfg),
             metrics_path(cfg),
         ):
@@ -130,6 +154,38 @@ class ServingContext:
     def _alias_map(self) -> dict[str, str]:
         return {self.alias(p) or p: p for p in self.predictions["src_principal"].unique().to_list()}
 
+    @cached_property
+    def graph_edges(self) -> pl.LazyFrame:
+        return pl.scan_parquet(edges_glob(graph_dir(self.cfg)))
+
+    @cached_property
+    def entities(self) -> pl.DataFrame:
+        return pl.read_parquet(graph_dir(self.cfg) / "entities.parquet")
+
+    @cached_property
+    def _entity_lookup(self) -> dict[str, tuple[EntityType, str]]:
+        return {
+            self.entity_id(t, k): (t, k)
+            for t, k in self.entities.select("entity_type", "entity_key").iter_rows()
+        }
+
+    @cached_property
+    def _ranked(self) -> pl.DataFrame:
+        """Evaluated windows with each model's rank inside its split (1 = highest score)."""
+        parts = []
+        for split in EVAL_SPLITS:
+            part = self.predictions.filter(pl.col("split") == split)
+            parts.append(
+                part.with_columns(
+                    pl.col(f"score__{m}")
+                    .rank("ordinal", descending=True)
+                    .cast(pl.Int64)
+                    .alias(f"rank__{m}")
+                    for m in self.mcfg.models
+                )
+            )
+        return pl.concat(parts)
+
     # ------------------------------------------------------------------ identifiers
     def alias(self, ident: str | None) -> str | None:
         if ident is None or not self.alias_ids:
@@ -148,6 +204,15 @@ class ServingContext:
         if principal is None:
             raise NotFoundError(window_id)
         return principal, int(start)
+
+    def entity_id(self, entity_type: str, key: str) -> str:
+        return f"{entity_type}:{self.alias(key)}"
+
+    def resolve_entity(self, entity_id: str) -> tuple[EntityType, str]:
+        hit = self._entity_lookup.get(entity_id)
+        if hit is None:
+            raise NotFoundError(entity_id)
+        return hit
 
     def _model(self, model_id: str) -> AnomalyModel:
         if model_id not in self.mcfg.models:
@@ -211,32 +276,76 @@ class ServingContext:
             model_versions={m: meta["artifact_sha256"][:12] for m, meta in self.model_meta.items()},
         )
 
+    def _headline(self, model_id: str) -> list[S.HeadlineMetrics]:
+        headline = []
+        for split in EVAL_SPLITS:
+            s = self.metrics["models"][model_id]["splits"][split]
+            op = s["operating_point"]
+            headline.append(
+                S.HeadlineMetrics(
+                    split=split,
+                    average_precision=s["average_precision"],
+                    random_ranking_average_precision=s["random_ranking_average_precision"],
+                    precision_at_10=next(
+                        p["precision"] for p in s["precision_at_k"] if p["k"] == 10
+                    ),
+                    alerts=op["alerts"],
+                    known_label_recall=op["known_label_recall"],
+                    precision_lower_bound=op["precision_lower_bound"],
+                )
+            )
+        return headline
+
+    def ablations(self) -> list[S.Ablation]:
+        out = []
+        for ab_id, ab in self.mcfg.ablations.items():
+            base_f = self.mcfg.features_for(ab.baseline)
+            cand_f = self.mcfg.features_for(ab.candidate)
+            base_h, cand_h = self._headline(ab.baseline), self._headline(ab.candidate)
+            splits = []
+            for b, c in zip(base_h, cand_h, strict=True):
+                ap_b, ap_c = b.average_precision, c.average_precision
+                splits.append(
+                    S.AblationSplit(
+                        split=b.split,
+                        n_positive_windows=self.metrics["models"][ab.baseline]["splits"][b.split][
+                            "n_positive_windows"
+                        ],
+                        baseline=b,
+                        candidate=c,
+                        average_precision_delta=None
+                        if ap_b is None or ap_c is None
+                        else ap_c - ap_b,
+                    )
+                )
+            out.append(
+                S.Ablation(
+                    ablation_id=ab_id,
+                    title=ab.title,
+                    baseline=ab.baseline,
+                    candidate=ab.candidate,
+                    added_features=[f for f in cand_f if f not in base_f],
+                    removed_features=[f for f in base_f if f not in cand_f],
+                    note=ab.note.strip(),
+                    splits=splits,
+                )
+            )
+        return out
+
     def model_list(self) -> S.ModelList:
         out = []
         for m, meta in self.model_meta.items():
-            headline = []
-            for split in EVAL_SPLITS:
-                s = self.metrics["models"][m]["splits"][split]
-                op = s["operating_point"]
-                headline.append(
-                    S.HeadlineMetrics(
-                        split=split,
-                        average_precision=s["average_precision"],
-                        random_ranking_average_precision=s["random_ranking_average_precision"],
-                        precision_at_10=next(
-                            p["precision"] for p in s["precision_at_k"] if p["k"] == 10
-                        ),
-                        alerts=op["alerts"],
-                        known_label_recall=op["known_label_recall"],
-                        precision_lower_bound=op["precision_lower_bound"],
-                    )
-                )
+            headline = self._headline(m)
             out.append(
                 S.ModelInfo(
                     model_id=m,
                     display_name=meta["display_name"],
                     kind=meta["kind"],
-                    description=MODEL_DESCRIPTIONS[meta["kind"]],
+                    description=(
+                        self.mcfg.models[m].description or MODEL_DESCRIPTIONS[meta["kind"]]
+                    )
+                    .strip()
+                    .replace("\n", " "),
                     features=meta["features"],
                     hyperparameters=meta["hyperparameters"],
                     threshold=meta["threshold"],
@@ -249,7 +358,7 @@ class ServingContext:
                     headline=headline,
                 )
             )
-        return S.ModelList(provenance=self.provenance, models=out)
+        return S.ModelList(provenance=self.provenance, models=out, ablations=self.ablations())
 
     def model_metrics(self, model_id: str) -> S.ModelMetrics:
         self._model(model_id)
@@ -276,9 +385,14 @@ class ServingContext:
             "window_start", "src_principal"
         )
         col = f"score__{model_id}"
+        kept, exact_above = part, None
+        if part.height > SCORE_TABLE_MAX_ROWS:
+            # Keep every row scoring strictly above the (cap+1)-th score, so no tie is split.
+            exact_above = float(part[col].sort(descending=True)[SCORE_TABLE_MAX_ROWS])
+            kept = part.filter(pl.col(col) > exact_above)
         rows = [
             (self.window_id(p, ws), round(float(sc), 6), int(lab))
-            for p, ws, sc, lab in part.select(
+            for p, ws, sc, lab in kept.select(
                 "src_principal", "window_start", col, "label"
             ).iter_rows()
         ]
@@ -290,6 +404,10 @@ class ServingContext:
             n_days=self._split_days(split),
             calibrated_threshold=model.threshold,
             rows=rows,
+            n_rows_total=part.height,
+            n_known_positive_total=int(part["label"].sum()),
+            truncated=exact_above is not None,
+            exact_above=exact_above,
         )
 
     def predictions_page(
@@ -404,7 +522,9 @@ class ServingContext:
             evidence_truncated=window_events.height > MAX_EVIDENCE,
         )
 
-    def explanation_bundle(self, model_id: str, split: str, top_n: int = 40) -> S.ExplanationBundle:
+    def explanation_bundle(
+        self, model_id: str, split: str, top_n: int = EXPLANATION_TOP_N
+    ) -> S.ExplanationBundle:
         """Top-N scored windows plus every known red-team window of the split (static export)."""
         col = f"score__{model_id}"
         part = self.predictions.filter(pl.col("split") == split)
@@ -448,6 +568,280 @@ class ServingContext:
         used = set(scoped_events(df.lazy(), self.cfg).collect()["event_id"].to_list())
         return S.EventPage(
             provenance=self.provenance, rows=self._event_rows(df, used), next_cursor=nxt
+        )
+
+    # ------------------------------------------------------------------ graph
+    def _edge_events(self, ids: list[int], start: int, end: int) -> dict[int, S.EdgeEvent]:
+        if not ids:
+            return {}
+        df = (
+            scan_auth(self.cfg)
+            .filter(
+                pl.col("day").is_between(start // DAY_SECONDS, (end - 1) // DAY_SECONDS)
+                & pl.col("event_id").is_in(sorted(set(ids)))
+            )
+            .collect()
+        )
+        labeled = self.labeled_event_ids
+        return {
+            r["event_id"]: S.EdgeEvent(
+                event_id=r["event_id"],
+                event_time_seconds=r["event_time_seconds"],
+                auth_type=r["auth_type"],
+                logon_type=r["logon_type"],
+                auth_orientation=r["auth_orientation"],
+                outcome=r["outcome"],
+                known_redteam=r["event_id"] in labeled,
+            )
+            for r in df.iter_rows(named=True)
+        }
+
+    def subgraph(
+        self, entity_id: str, start: int, end: int, hops: int, max_edges: int
+    ) -> S.Subgraph:
+        focus_type, key = self.resolve_entity(entity_id)
+        g = self.cfg.graph
+        w = self.cfg.features.window_seconds
+        res = subgraph(
+            self.graph_edges,
+            focus_type=focus_type,
+            focus_key=key,
+            start=start,
+            end=end,
+            window_seconds=w,
+            hops=hops,
+            max_edges=max_edges,
+            hub_max_principals=g.hub_max_principals,
+            sample_limit=2 * g.sample_events_per_edge,
+        )
+        lo = start // w * w
+        ids = [i for lst in res.edges["sample_event_ids"].to_list() for i in lst]
+        events = self._edge_events(ids, lo, end)
+        computer = lambda c: self.entity_id("computer", c)  # noqa: E731
+        edges = []
+        for r in res.edges.iter_rows(named=True):
+            sample = sorted(
+                (events[i] for i in r["sample_event_ids"] if i in events),
+                key=lambda e: (not e.known_redteam, e.event_time_seconds, e.event_id),
+            )[: g.sample_events_per_edge]
+            p, src, dst = r["src_principal"], r["src_computer"], r["dst_computer"]
+            edges.append(
+                S.GraphEdge(
+                    edge_id=f"e:{self.alias(p)}:{self.alias(src)}:{self.alias(dst)}",
+                    principal=self.alias(p) or "",
+                    principal_id=self.entity_id("principal", p),
+                    source=computer(src),
+                    target=computer(dst),
+                    hop=r["hop"],
+                    n_events=r["n_events"],
+                    n_success=r["n_success"],
+                    n_fail=r["n_fail"],
+                    n_known_redteam=r["n_known_redteam"],
+                    n_windows=r["n_windows"],
+                    first_event_seconds=r["first_t"],
+                    last_event_seconds=r["last_t"],
+                    auth_types=r["auth_types"],
+                    edge_first_seen_seconds=r["edge_first_seen_seconds"],
+                    first_observed_in_range=r["first_observed_in_range"],
+                    is_local=r["is_local"],
+                    sample_events=sample,
+                )
+            )
+        nodes = [
+            S.GraphNode(
+                node_id=computer(r["computer"]),
+                label=self.alias(r["computer"]) or "",
+                hop=r["hop"],
+                n_principals_in_range=r["n_principals_in_range"],
+                is_hub=r["is_hub"],
+                expanded=r["expanded"],
+            )
+            for r in res.nodes.iter_rows(named=True)
+        ]
+        principals = [
+            S.GraphPrincipal(
+                principal_id=self.entity_id("principal", r["src_principal"]),
+                label=self.alias(r["src_principal"]) or "",
+                hop=r["hop"],
+                n_edges=r["n_edges"],
+                n_events=r["n_events"],
+                n_known_redteam=r["n_known_redteam"],
+            )
+            for r in res.edges.group_by("src_principal")
+            .agg(
+                pl.col("hop").min(),
+                pl.len().alias("n_edges"),
+                pl.col("n_events").sum(),
+                pl.col("n_known_redteam").sum(),
+            )
+            .sort(["hop", "n_events", "src_principal"], descending=[False, True, False])
+            .iter_rows(named=True)
+        ]
+        return S.Subgraph(
+            provenance=self.provenance,
+            focus=entity_id,
+            start_seconds=lo,
+            end_seconds=end,
+            hops=hops,
+            max_edges=max_edges,
+            hub_max_principals=g.hub_max_principals,
+            n_edges_total=res.n_edges_total,
+            truncated=res.truncated,
+            truncation_order=TRUNCATION_ORDER,
+            semantics=GRAPH_SEMANTICS,
+            nodes=nodes,
+            edges=edges,
+            principals=principals,
+        )
+
+    def _window_summary(self, row: dict[str, Any]) -> S.GraphWindowSummary:
+        scores = {}
+        for m, model in self.models.items():
+            assert model.threshold is not None
+            sc = float(row[f"score__{m}"])
+            scores[m] = S.WindowScore(
+                score=sc,
+                threshold=model.threshold,
+                flagged=sc >= model.threshold,
+                rank=row[f"rank__{m}"],
+            )
+        p = row["src_principal"]
+        return S.GraphWindowSummary(
+            window_id=self.window_id(p, row["window_start"]),
+            principal=self.alias(p) or "",
+            principal_id=self.entity_id("principal", p),
+            split=row["split"],
+            window_start=row["window_start"],
+            window_end=row["window_end"],
+            day=row["day"],
+            label="known_redteam" if row["label"] else "unlabeled",
+            n_labeled_events=row["n_labeled_events"],
+            scores=scores,
+        )
+
+    def graph_window_index(self, split: str, top_n: int = EXPLANATION_TOP_N) -> S.GraphWindowIndex:
+        """The windows the static explorer precomputes: each model's top N plus known red-team."""
+        if split not in EVAL_SPLITS:
+            raise NotFoundError(split)
+        part = self._ranked.filter(pl.col("split") == split)
+        rank_cols = [f"rank__{m}" for m in self.mcfg.models]
+        chosen = part.filter(
+            pl.any_horizontal(pl.col(c) <= top_n for c in rank_cols) | (pl.col("label") == 1)
+        ).sort(pl.min_horizontal(rank_cols), "window_start", "src_principal")
+        return S.GraphWindowIndex(
+            provenance=self.provenance,
+            split=split,
+            selection=f"top {top_n} windows of each model plus all known red-team windows in the split",
+            windows=[self._window_summary(r) for r in chosen.iter_rows(named=True)],
+        )
+
+    def graph_window(self, window_id: str) -> S.GraphWindow:
+        principal, start = self.resolve_window(window_id)
+        row = self._ranked.filter(
+            (pl.col("src_principal") == principal) & (pl.col("window_start") == start)
+        )
+        if row.is_empty():
+            raise NotFoundError(window_id)
+        summary = self._window_summary(row.row(0, named=True))
+        graph = self.subgraph(
+            summary.principal_id,
+            summary.window_start,
+            summary.window_end,
+            hops=2,
+            max_edges=self.cfg.graph.export_max_edges,
+        )
+        return S.GraphWindow(provenance=self.provenance, window=summary, graph=graph)
+
+    def entity(self, entity_id: str) -> S.EntityDetail:
+        etype, key = self.resolve_entity(entity_id)
+        row = self.entities.filter(
+            (pl.col("entity_type") == etype) & (pl.col("entity_key") == key)
+        ).row(0, named=True)
+        links = pl.scan_parquet(graph_dir(self.cfg) / "links.parquet")
+        if etype == "computer":
+            mine, other_col, other_type = (
+                links.filter(pl.col("computer") == key),
+                "src_principal",
+                "principal",
+            )
+        else:
+            mine, other_col, other_type = (
+                links.filter(pl.col("src_principal") == key),
+                "computer",
+                "computer",
+            )
+        mine_df = mine.collect()
+        top = mine_df.sort(["n_events", other_col], descending=[True, False]).head(ENTITY_TOP_LINKS)
+        top_links = [
+            S.EntityLink(
+                entity_id=self.entity_id(other_type, r[other_col]),
+                label=self.alias(r[other_col]) or "",
+                n_events=r["n_events"],
+                n_known_redteam=r["n_known_redteam"],
+                first_seen_seconds=r["first_t"],
+                last_seen_seconds=r["last_t"],
+            )
+            for r in top.iter_rows(named=True)
+        ]
+        extra: dict[str, Any] = {}
+        if etype == "principal":
+            mine_w = self.features.filter(pl.col("src_principal") == key)
+            extra["windows_by_split"] = [
+                S.SplitWindows(split=sp, n_windows=n, n_known_positive_windows=int(k))
+                for sp, n, k in mine_w.group_by("split")
+                .agg(pl.len(), pl.col("label").sum())
+                .sort("split")
+                .iter_rows()
+            ]
+            ranked = self._ranked.filter(
+                (pl.col("src_principal") == key) & (pl.col("split") == "test")
+            )
+            model_windows = []
+            for m, model in self.models.items():
+                assert model.threshold is not None
+                col = f"score__{m}"
+                top_w = ranked.sort([col, "window_start"], descending=[True, False]).head(
+                    ENTITY_TOP_WINDOWS
+                )
+                model_windows.append(
+                    S.EntityModelWindows(
+                        model_id=m,
+                        display_name=model.display_name,
+                        split="test",
+                        n_windows=ranked.height,
+                        alerts=int((ranked[col] >= model.threshold).sum()),
+                        top_windows=[
+                            S.EntityWindow(
+                                window_id=self.window_id(key, r["window_start"]),
+                                window_start=r["window_start"],
+                                score=float(r[col]),
+                                flagged=float(r[col]) >= model.threshold,
+                                known_redteam=bool(r["label"]),
+                            )
+                            for r in top_w.iter_rows(named=True)
+                        ],
+                    )
+                )
+            extra["model_windows"] = model_windows
+            for f in ("n_active_windows", "n_distinct_src_computers", "n_distinct_dst_computers"):
+                extra[f] = row[f]
+        else:
+            for f in ("n_distinct_principals", "in_degree", "out_degree", "n_local_events"):
+                extra[f] = row[f]
+        return S.EntityDetail(
+            provenance=self.provenance,
+            entity_id=entity_id,
+            entity_type=etype,
+            label=self.alias(key) or "",
+            scope=ENTITY_SCOPE,
+            first_seen_seconds=row["first_seen_seconds"],
+            last_seen_seconds=row["last_seen_seconds"],
+            n_events=row["n_events"],
+            n_fail=row["n_fail"],
+            n_known_redteam_events=row["n_known_redteam_events"],
+            top_links=top_links,
+            n_links_total=mine_df.height,
+            **extra,
         )
 
     def benchmarks(self, export_payload_bytes: int | None = None) -> S.Benchmarks:

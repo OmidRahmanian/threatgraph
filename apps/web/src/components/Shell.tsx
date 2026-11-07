@@ -9,7 +9,7 @@ import { ProvenanceBadge } from "./ui";
 const NAV = [
   { href: "/threatgraph", label: "Overview", built: true },
   { href: "/threatgraph/lab", label: "Experiment Lab", built: true },
-  { href: null, label: "Network explorer", built: false, phase: "Phase 3" },
+  { href: "/threatgraph/explorer", label: "Network explorer", built: true },
   { href: null, label: "Incident replay", built: false, phase: "Phase 4" },
 ] as const;
 

@@ -114,3 +114,52 @@ def test_features_are_causal_on_fixture(tmp_path) -> None:
     b = truncated.filter(pl.col("window_end") <= cutoff).select(cols).sort("window_id")
     assert a.height > 1000
     assert_frame_equal(a, b)
+
+
+def test_graph_features_rare_destinations_and_pivots(tmp_cfg) -> None:
+    day = 86_400
+    df = feats(
+        [
+            (0, 5, "U2@DOM1", "C0", "C2", "Success"),  # U2 reaches C2 first (window 0)
+            (1, 10, "U1@DOM1", "C1", "C2", "Success"),  # U1 arrives at C2 ...
+            (2, 20, "U1@DOM1", "C2", "C3", "Success"),  # ... then authenticates from it: pivot
+            (3, H + 5, "U1@DOM1", "C1", "C2", "Success"),  # C2 now has another user before
+            (4, H + 6, "U1@DOM1", "C1", "C9", "Success"),  # C9: nobody else, ever
+            (5, 0, "U3@DOM1", "C1", "C5", "Success"),
+            (6, 2 * day, "U3@DOM1", "C5", "C6", "Success"),  # arrival too old: no pivot
+            (7, 10, "U4@DOM1", "C7", "C7", "Success"),  # a local logon is not an arrival
+            (8, 20, "U4@DOM1", "C7", "C8", "Success"),
+            (9, 10, "U5@DOM1", "C8", "C10", "Success"),  # arrival at C10 ...
+            (10, 20, "U5@DOM1", "C1", "C8", "Success"),  # ... does not make C1 a pivot
+            (11, 30, "U1@DOM1", "C4", "C4", "Success"),
+        ],
+        tmp_cfg,
+    )
+    u1_w0, u1_w1 = row(df, "U1@DOM1", 0), row(df, "U1@DOM1", H)
+    assert u1_w0["n_pivot_src"] == 1
+    # Window 0: U2's first visit to C2 is in the same window, so it is not "before".
+    assert u1_w0["n_rare_dst"] == 3  # C2, C3, C4
+    assert u1_w1["n_rare_dst"] == 1  # C9 only; U2 had reached C2 in an earlier window
+    assert u1_w1["n_pivot_src"] == 0
+    assert row(df, "U3@DOM1", 2 * day)["n_pivot_src"] == 0
+    assert row(df, "U4@DOM1", 0)["n_pivot_src"] == 0
+    assert row(df, "U5@DOM1", 0)["n_pivot_src"] == 0
+
+
+def test_chunk_size_does_not_change_features(tmp_path) -> None:
+    """Carried state makes chunked processing identical to processing everything at once."""
+    from tests.conftest import make_cfg
+
+    cfg = make_cfg(tmp_path)
+    generate_fixture(cfg.raw_path, SyntheticSpec(seed=7))
+    ingest_auth(cfg, cfg.processed_path)
+    auth = scan_auth(cfg).collect().lazy()
+
+    def with_chunk(seconds: int) -> pl.DataFrame:
+        c = cfg.model_copy(
+            update={"features": cfg.features.model_copy(update={"chunk_seconds": seconds})}
+        )
+        return build_window_features(auth, NO_LABELS, c)
+
+    # 7-hour chunks are deliberately misaligned with days; 30 days is a single chunk.
+    assert_frame_equal(with_chunk(7 * H), with_chunk(30 * 86_400))

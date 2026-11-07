@@ -52,7 +52,7 @@ checks that the UI displays it.
 - **Uncertainty.** No confidence intervals yet. With fewer than 10 positive windows per
   split, model differences are noisy. Planned: block bootstrap over days or accounts, not
   independent windows.
-- No graph-feature ablation yet (Phase 3).
+- The graph-feature ablation (M1 vs M3) exists, but on the demo it is not blind; see `docs/graph.md`.
 - No drift monitor yet (Phase 5).
 - Synthetic results show the pipeline works. They do not measure real-world detection
   performance.

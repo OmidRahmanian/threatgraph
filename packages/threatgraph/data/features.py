@@ -1,4 +1,4 @@
-"""Causal behavioral features per (source principal, fixed time window).
+"""Causal behavioral and graph features per (source principal, fixed time window).
 
 Scoring unit
     One row per (src_principal, window_start) in which the principal had at least one
@@ -13,6 +13,18 @@ Novelty
     past, novelty is causal. The warm-up split exists so that the first days, where
     everything is novel, are used only as history and never scored.
 
+Graph features
+    `n_rare_dst` counts destinations that no *other* in-scope principal had authenticated to
+    before the window. `n_pivot_src` counts source computers the principal authenticated
+    from after reaching them itself as a remote destination (a two-hop path A→B, B→C) within
+    `pivot_lookback_seconds`. Both use only earlier events.
+
+Bounded memory
+    Events are processed in time chunks (`features.chunk_seconds`). Everything that crosses a
+    chunk boundary (first-seen sets, the last outcome per destination, recent arrivals) is
+    carried as explicit state, so the output is identical for any chunk size
+    (tests/unit/test_features.py checks this) and peak memory follows one chunk.
+
 Cold start
     `log_prior_windows` encodes how much history a principal has. Rolling baselines with no
     history yield z = 0 (no evidence of deviation) rather than an imputed mean.
@@ -20,11 +32,12 @@ Cold start
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 
 import polars as pl
 
-from threatgraph.config import DatasetConfig
+from threatgraph.config import DAY_SECONDS, DatasetConfig
 
 FEATURE_DESCRIPTIONS: dict[str, str] = {
     "n_events": "Authentication events (excluding LogOff) by the principal in the window",
@@ -44,11 +57,26 @@ FEATURE_DESCRIPTIONS: dict[str, str] = {
     "z_events": "Deviation of n_events from the principal's trailing baseline (prior windows)",
     "z_distinct_dst": "Deviation of fan-out from the principal's trailing baseline",
     "log_prior_windows": "log(1 + number of earlier active windows) — history / cold start",
+    "n_rare_dst": "Destinations in the window that no other account had authenticated to before",
+    "n_pivot_src": "Source computers the account had itself reached as a remote destination "
+    "shortly before (two-hop path)",
 }
 
 ID_COLUMNS = ["window_id", "src_principal", "window_start", "window_end", "day", "split"]
 LABEL_COLUMNS = ["n_labeled_events", "label"]
 TIME_COLUMNS = ["first_event_seconds", "last_event_seconds", "first_labeled_event_seconds"]
+EVENT_COLUMNS = [
+    "event_id",
+    "event_time_seconds",
+    "src_principal",
+    "src_computer",
+    "dst_computer",
+    "auth_type",
+    "outcome",
+]
+
+P = "src_principal"
+KEYS = [P, "window_start"]
 
 
 def _is_user_principal() -> pl.Expr:
@@ -66,71 +94,236 @@ def scoped_events(auth: pl.LazyFrame, cfg: DatasetConfig) -> pl.LazyFrame:
     return lf
 
 
-def build_window_features(
-    auth: pl.LazyFrame,
+def time_chunks(auth: pl.LazyFrame, chunk_seconds: int) -> list[tuple[int, int]]:
+    """Half-open [start, end) ranges aligned to `chunk_seconds` that cover every event."""
+    lo, hi = (
+        auth.select(
+            pl.col("event_time_seconds").min().alias("lo"),
+            pl.col("event_time_seconds").max().alias("hi"),
+        )
+        .collect()
+        .row(0)
+    )
+    if lo is None:
+        return []
+    first = lo // chunk_seconds * chunk_seconds
+    return [(s, s + chunk_seconds) for s in range(first, hi + 1, chunk_seconds)]
+
+
+def chunk_of(auth: pl.LazyFrame, start: int, end: int) -> pl.LazyFrame:
+    """Events in [start, end). Also filters the hive `day` partition so whole days are skipped."""
+    lf = auth.filter((pl.col("event_time_seconds") >= start) & (pl.col("event_time_seconds") < end))
+    if "day" in auth.collect_schema().names():
+        lf = lf.filter(pl.col("day").is_between(start // DAY_SECONDS, (end - 1) // DAY_SECONDS))
+    return lf
+
+
+def _empty(schema: dict[str, Any]) -> pl.DataFrame:
+    return pl.DataFrame(schema=schema)
+
+
+@dataclass
+class _State:
+    """Everything a chunk needs to know about earlier chunks."""
+
+    seen_dst: pl.DataFrame = field(
+        default_factory=lambda: _empty(
+            {P: pl.String, "dst_computer": pl.String, "first_ws": pl.Int64}
+        )
+    )
+    seen_src: pl.DataFrame = field(
+        default_factory=lambda: _empty({P: pl.String, "src_computer": pl.String})
+    )
+    seen_auth: pl.DataFrame = field(
+        default_factory=lambda: _empty({P: pl.String, "auth_type": pl.String})
+    )
+    seen_edge: pl.DataFrame = field(
+        default_factory=lambda: _empty({"src_computer": pl.String, "dst_computer": pl.String})
+    )
+    last_outcome: pl.DataFrame = field(
+        default_factory=lambda: _empty(
+            {P: pl.String, "dst_computer": pl.String, "_carry": pl.String}
+        )
+    )
+    last_arrival: pl.DataFrame = field(
+        default_factory=lambda: _empty({P: pl.String, "computer": pl.String, "t_arr": pl.Int64})
+    )
+
+
+def _novel(
+    ev: pl.DataFrame, seen: pl.DataFrame, col: str, name: str
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """(per-window counts of first observations, the newly seen keys with their window)."""
+    firsts = ev.filter(pl.col(col).is_not_null()).group_by(P, col).agg(pl.col("window_start").min())
+    new = firsts.join(seen.select(P, col), on=[P, col], how="anti")
+    counts = new.group_by(KEYS).agg(pl.len().alias(name))
+    return counts, new
+
+
+def _chunk_features(
+    chunk_all: pl.LazyFrame,
     labels: pl.DataFrame,
     cfg: DatasetConfig,
-) -> pl.DataFrame:
-    """Compute the feature table. `auth` must follow the internal auth schema."""
+    st: _State,
+    chunk_end: int,
+) -> pl.DataFrame | None:
     w = cfg.features.window_seconds
     burst = cfg.features.burst_seconds
-    k = cfg.features.baseline_windows
+    lookback = cfg.features.pivot_lookback_seconds
 
-    # Global computer-edge novelty uses every event, including machine accounts.
-    edge_first = (
-        auth.filter(pl.col("src_computer").is_not_null() & pl.col("dst_computer").is_not_null())
+    # Global computer-edge novelty uses every event, including machine accounts and LogOff.
+    edges = (
+        chunk_all.filter(
+            pl.col("src_computer").is_not_null() & pl.col("dst_computer").is_not_null()
+        )
         .group_by("src_computer", "dst_computer")
         .agg(pl.col("event_time_seconds").min().alias("first_t"))
+        .collect()
     )
+    new_edges = edges.join(st.seen_edge, on=["src_computer", "dst_computer"], how="anti")
+    st.seen_edge = pl.concat([st.seen_edge, new_edges.select("src_computer", "dst_computer")])
 
     ev = (
-        scoped_events(auth, cfg)
+        scoped_events(chunk_all, cfg)
+        .select(EVENT_COLUMNS)
         .with_columns((pl.col("event_time_seconds") // w * w).alias("window_start"))
         .sort("event_time_seconds", "event_id")
+        .collect()
     )
+    if ev.is_empty():
+        return None
 
-    def first_seen(cols: list[str], name: str) -> pl.LazyFrame:
-        return (
-            ev.filter(pl.all_horizontal(pl.col(c).is_not_null() for c in cols))
-            .group_by(["src_principal", *cols])
-            .agg(pl.col("window_start").min().alias("window_start"))
-            .group_by("src_principal", "window_start")
-            .agg(pl.len().alias(name))
-        )
-
-    novel_dst = first_seen(["dst_computer"], "n_novel_dst")
-    novel_src = first_seen(["src_computer"], "n_novel_src")
-    novel_auth = first_seen(["auth_type"], "n_novel_auth_type")
+    novel_dst, new_dst = _novel(ev, st.seen_dst, "dst_computer", "n_novel_dst")
+    novel_src, new_src = _novel(ev, st.seen_src, "src_computer", "n_novel_src")
+    novel_auth, new_auth = _novel(ev, st.seen_auth, "auth_type", "n_novel_auth_type")
+    st.seen_dst = pl.concat([st.seen_dst, new_dst.rename({"window_start": "first_ws"})])
+    st.seen_src = pl.concat([st.seen_src, new_src.select(P, "src_computer")])
+    st.seen_auth = pl.concat([st.seen_auth, new_auth.select(P, "auth_type")])
 
     # A novel edge counts toward the window of the principal event that realises its first
     # observation (machine-account first observations count toward no principal window).
     novel_edge = (
-        ev.join(edge_first, on=["src_computer", "dst_computer"], how="inner")
+        ev.join(new_edges, on=["src_computer", "dst_computer"], how="inner")
         .filter(pl.col("event_time_seconds") == pl.col("first_t"))
-        .group_by("src_principal", "window_start")
+        .group_by(KEYS)
         .agg(pl.struct("src_computer", "dst_computer").n_unique().alias("n_novel_edge"))
     )
 
+    # The previous outcome on the same (principal, destination), continuing across chunks.
+    grp = [P, "dst_computer"]
+    with_prev = ev.with_columns(
+        pl.col("outcome").shift(1).over(grp).alias("_prev"),
+        (pl.int_range(pl.len()).over(grp) == 0).alias("_first"),
+    ).join(st.last_outcome, on=grp, how="left", nulls_equal=True)
     post_fail = (
-        ev.with_columns(
-            pl.col("outcome").shift(1).over("src_principal", "dst_computer").alias("_prev")
+        with_prev.with_columns(
+            pl.when(pl.col("_first"))
+            .then(pl.col("_carry"))
+            .otherwise(pl.col("_prev"))
+            .alias("_prev")
         )
         .filter((pl.col("outcome") == "Success") & (pl.col("_prev") == "Fail"))
-        .group_by("src_principal", "window_start")
+        .group_by(KEYS)
         .agg(pl.len().alias("n_post_fail_success"))
     )
+    st.last_outcome = pl.concat(
+        [
+            st.last_outcome,
+            ev.group_by(grp, maintain_order=True).agg(pl.col("outcome").last().alias("_carry")),
+        ]
+    ).unique(subset=grp, keep="last", maintain_order=True)
 
     bursts = (
-        ev.group_by("src_principal", "window_start", pl.col("event_time_seconds") // burst)
+        ev.group_by(P, "window_start", pl.col("event_time_seconds") // burst)
         .agg(pl.len().alias("_n"))
-        .group_by("src_principal", "window_start")
+        .group_by(KEYS)
         .agg(pl.col("_n").max().alias("max_burst"))
     )
 
-    label_ev = labels.lazy().select("event_id").with_columns(pl.lit(1).alias("_lab"))
+    # Rare destinations: how many *other* principals had first reached the destination
+    # before this window starts (strictly earlier windows only).
+    triples = (
+        ev.filter(pl.col("dst_computer").is_not_null())
+        .select(P, "window_start", "dst_computer")
+        .unique()
+    )
+    popularity = (
+        st.seen_dst.filter(pl.col("dst_computer").is_in(triples["dst_computer"].unique().implode()))
+        .group_by("dst_computer", "first_ws")
+        .agg(pl.len().alias("n"))
+        .sort("dst_computer", "first_ws")
+        .with_columns(pl.col("n").cum_sum().over("dst_computer").alias("n_before"))
+        .sort("first_ws")
+    )
+    rare = (
+        triples.sort("window_start")
+        .join_asof(
+            popularity.select("dst_computer", "first_ws", "n_before"),
+            left_on="window_start",
+            right_on="first_ws",
+            by="dst_computer",
+            strategy="backward",
+            allow_exact_matches=False,
+            check_sortedness=False,  # both sides are sorted explicitly above
+        )
+        .join(st.seen_dst.rename({"first_ws": "_own_first"}), on=[P, "dst_computer"], how="left")
+        .with_columns(
+            (
+                pl.col("n_before").fill_null(0)
+                - (pl.col("_own_first") < pl.col("window_start")).cast(pl.Int64)
+            ).alias("_others")
+        )
+        .group_by(KEYS)
+        .agg((pl.col("_others") == 0).sum().cast(pl.Int64).alias("n_rare_dst"))
+    )
+
+    # Pivots: a remote authentication *from* a computer the principal had itself reached as a
+    # remote destination at an earlier time (within the lookback).
+    remote = ev.filter(
+        pl.col("src_computer").is_not_null()
+        & pl.col("dst_computer").is_not_null()
+        & (pl.col("src_computer") != pl.col("dst_computer"))
+    )
+    arrivals = pl.concat(
+        [
+            st.last_arrival,
+            remote.select(
+                P,
+                pl.col("dst_computer").alias("computer"),
+                pl.col("event_time_seconds").alias("t_arr"),
+            ),
+        ]
+    ).sort("t_arr")
+    pivots = (
+        remote.select(
+            P, pl.col("src_computer").alias("computer"), "event_time_seconds", "window_start"
+        )
+        .sort("event_time_seconds")
+        .join_asof(
+            arrivals,
+            left_on="event_time_seconds",
+            right_on="t_arr",
+            by=[P, "computer"],
+            strategy="backward",
+            allow_exact_matches=False,
+            check_sortedness=False,  # both sides are sorted explicitly above
+        )
+        .filter(
+            pl.col("t_arr").is_not_null()
+            & (pl.col("event_time_seconds") - pl.col("t_arr") <= lookback)
+        )
+        .group_by(KEYS)
+        .agg(pl.col("computer").n_unique().alias("n_pivot_src"))
+    )
+    st.last_arrival = (
+        arrivals.group_by(P, "computer")
+        .agg(pl.col("t_arr").max())
+        .filter(pl.col("t_arr") >= chunk_end - lookback)
+    )
+
     base = (
-        ev.join(label_ev, on="event_id", how="left")
-        .group_by("src_principal", "window_start")
+        ev.join(labels, on="event_id", how="left")
+        .group_by(KEYS)
         .agg(
             pl.len().alias("n_events"),
             (pl.col("outcome") == "Fail").sum().alias("n_fail"),
@@ -147,11 +340,30 @@ def build_window_features(
             .alias("first_labeled_event_seconds"),
         )
     )
-
-    keys = ["src_principal", "window_start"]
     df = base
-    for part in (novel_dst, novel_src, novel_auth, novel_edge, post_fail, bursts):
-        df = df.join(part, on=keys, how="left")
+    for part in (novel_dst, novel_src, novel_auth, novel_edge, post_fail, bursts, rare, pivots):
+        df = df.join(part, on=KEYS, how="left")
+    return df
+
+
+def build_window_features(
+    auth: pl.LazyFrame,
+    labels: pl.DataFrame,
+    cfg: DatasetConfig,
+) -> pl.DataFrame:
+    """Compute the feature table. `auth` must follow the internal auth schema."""
+    w = cfg.features.window_seconds
+    k = cfg.features.baseline_windows
+    label_ev = labels.select("event_id").with_columns(pl.lit(1).alias("_lab"))
+
+    st = _State()
+    parts = []
+    for start, end in time_chunks(auth, cfg.features.chunk_seconds):
+        part = _chunk_features(chunk_of(auth, start, end), label_ev, cfg, st, end)
+        if part is not None:
+            parts.append(part)
+    if not parts:
+        raise ValueError("no in-scope authentication events to build features from")
 
     int_fill = [
         "n_novel_dst",
@@ -160,9 +372,13 @@ def build_window_features(
         "n_novel_edge",
         "n_post_fail_success",
         "n_labeled_events",
+        "n_rare_dst",
+        "n_pivot_src",
     ]
     df = (
-        df.with_columns(pl.col(c).fill_null(0).cast(pl.Int64) for c in int_fill)
+        pl.concat(parts)
+        .lazy()
+        .with_columns(pl.col(c).fill_null(0).cast(pl.Int64) for c in int_fill)
         .with_columns(
             pl.col(c).cast(pl.Int64)
             for c in (

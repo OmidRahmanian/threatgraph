@@ -22,6 +22,7 @@ from threatgraph.config import (
 from threatgraph.data.features import FEATURE_DESCRIPTIONS, build_window_features, split_summary
 from threatgraph.data.ingest import auth_glob, ingest_auth, ingest_redteam, write_json
 from threatgraph.data.redteam import match_redteam
+from threatgraph.graph.build import build_edge_table, build_entity_tables
 from threatgraph.ml.metrics import EVALUATION_ASSUMPTIONS, detection_latency, evaluate_scores
 from threatgraph.ml.models import AnomalyModel, build_model
 from threatgraph.provenance import PIPELINE_VERSION, label_source, provenance_block
@@ -45,6 +46,10 @@ def labels_path(cfg: DatasetConfig) -> Path:
 
 def quality_report_path(cfg: DatasetConfig) -> Path:
     return cfg.processed_path / "reports" / "data_quality.json"
+
+
+def graph_dir(cfg: DatasetConfig) -> Path:
+    return cfg.processed_path / "graph"
 
 
 def predictions_path(cfg: DatasetConfig) -> Path:
@@ -134,7 +139,7 @@ def run_features(cfg: DatasetConfig) -> dict[str, Any]:
             "window_seconds": cfg.features.window_seconds,
             "burst_seconds": cfg.features.burst_seconds,
             "baseline_windows": cfg.features.baseline_windows,
-            "principals": cfg.features.principals,
+            "principal_scope": cfg.features.principals,
             "n_rows": feats.height,
             "features": FEATURE_DESCRIPTIONS,
             "splits": split_summary(feats),
@@ -142,6 +147,29 @@ def run_features(cfg: DatasetConfig) -> dict[str, Any]:
         }
         write_json(path.parent / "feature_manifest.json", manifest)
         rec["n_windows"] = feats.height
+    return manifest
+
+
+def run_graph(cfg: DatasetConfig) -> dict[str, Any]:
+    require(labels_path(cfg), "Run scripts/ingest_lanl.py (or run_pipeline.py) first.")
+    with stage_run(cfg, "graph") as rec:
+        out = graph_dir(cfg)
+        labels = pl.read_parquet(labels_path(cfg))
+        edges = build_edge_table(scan_auth(cfg), labels, cfg, out)
+        entities = build_entity_tables(out)
+        manifest = {
+            "dataset": cfg.name,
+            "config_hash": config_hash(cfg),
+            "scope": "non-LogOff events of in-scope principals with both computers recorded",
+            "principal_scope": cfg.features.principals,
+            "edge_unit": "(window, principal, source computer, destination computer)",
+            "window_seconds": cfg.features.window_seconds,
+            **edges,
+            **entities,
+            "graph_config": cfg.graph.model_dump(),
+        }
+        write_json(out / "graph_manifest.json", manifest)
+        rec["edge_rows"] = edges["edge_rows"]
     return manifest
 
 
@@ -247,11 +275,13 @@ def run_evaluate(cfg: DatasetConfig, mcfg: ModelsConfig) -> dict[str, Any]:
                 "splits": per_split,
             }
         write_json(metrics_path(cfg), result)
-        write_benchmark_report(cfg, result)
+        write_benchmark_report(cfg, result, mcfg)
     return result
 
 
-def write_benchmark_report(cfg: DatasetConfig, metrics: dict[str, Any]) -> Path:
+def write_benchmark_report(
+    cfg: DatasetConfig, metrics: dict[str, Any], mcfg: ModelsConfig | None = None
+) -> Path:
     """Markdown comparison table generated from metrics.json (never typed by hand)."""
     prov = metrics["provenance"]
     lines = [
@@ -279,6 +309,27 @@ def write_benchmark_report(cfg: DatasetConfig, metrics: dict[str, Any]) -> Path:
                 f"{fmt(op['precision_lower_bound'])} |"
             )
     lines += ["", "n/e = not estimable (no known positives in the split).", ""]
+    for ab in (mcfg.ablations if mcfg else {}).values():
+        base, cand = metrics["models"][ab.baseline], metrics["models"][ab.candidate]
+        added = sorted(set(mcfg.features_for(ab.candidate)) - set(mcfg.features_for(ab.baseline)))  # type: ignore[union-attr]
+        lines += [
+            f"## {ab.title}",
+            "",
+            f"Features added in the candidate: {', '.join(f'`{f}`' for f in added) or 'none'}.",
+            "",
+            "| Split | AP baseline | AP candidate | Δ AP | Recall baseline | Recall candidate |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+        for split in EVAL_SPLITS:
+            b, c = base["splits"][split], cand["splits"][split]
+            ap_b, ap_c = b["average_precision"], c["average_precision"]
+            delta = None if ap_b is None or ap_c is None else ap_c - ap_b
+            lines.append(
+                f"| {split} | {fmt(ap_b)} | {fmt(ap_c)} | {fmt(delta)} | "
+                f"{fmt(b['operating_point']['known_label_recall'])} | "
+                f"{fmt(c['operating_point']['known_label_recall'])} |"
+            )
+        lines += ["", ab.note.strip(), ""]
     lines += [f"- {a}" for a in metrics["evaluation_assumptions"]]
     path = cfg.artifacts_path / "reports" / "evaluation.md"
     path.parent.mkdir(parents=True, exist_ok=True)

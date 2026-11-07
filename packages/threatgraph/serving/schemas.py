@@ -98,9 +98,29 @@ class ModelInfo(BaseModel):
     headline: list[HeadlineMetrics]
 
 
+class AblationSplit(BaseModel):
+    split: str
+    n_positive_windows: int
+    baseline: HeadlineMetrics
+    candidate: HeadlineMetrics
+    average_precision_delta: float | None
+
+
+class Ablation(BaseModel):
+    ablation_id: str
+    title: str
+    baseline: str
+    candidate: str
+    added_features: list[str]
+    removed_features: list[str]
+    note: str
+    splits: list[AblationSplit]
+
+
 class ModelList(BaseModel):
     provenance: Provenance
     models: list[ModelInfo]
+    ablations: list[Ablation]
 
 
 class ThresholdPoint(BaseModel):
@@ -182,6 +202,12 @@ class ScoreTable(BaseModel):
     calibrated_threshold: float
     columns: list[str] = Field(default=["window_id", "score", "label"])
     rows: list[tuple[str, float, int]]
+    # Large splits keep only the highest-scoring rows. Metrics stay exact for thresholds
+    # above `exact_above` because every row scoring higher is included; totals cover all rows.
+    n_rows_total: int
+    n_known_positive_total: int
+    truncated: bool
+    exact_above: float | None
 
 
 class PredictionRow(BaseModel):
@@ -277,6 +303,165 @@ class Benchmarks(BaseModel):
     processed_bytes: dict[str, int]
     export_payload_bytes: int | None
     library_versions: dict[str, str]
+
+
+class EdgeEvent(BaseModel):
+    """An authentication event behind a graph edge (principal and computers are the edge's)."""
+
+    event_id: int
+    event_time_seconds: int
+    auth_type: str | None
+    logon_type: str | None
+    auth_orientation: str | None
+    outcome: str | None
+    known_redteam: bool
+
+
+class GraphNode(BaseModel):
+    node_id: str
+    label: str
+    hop: int
+    n_principals_in_range: int
+    is_hub: bool
+    expanded: bool
+
+
+class GraphEdge(BaseModel):
+    edge_id: str
+    principal: str
+    principal_id: str
+    source: str
+    target: str
+    hop: int
+    n_events: int
+    n_success: int
+    n_fail: int
+    n_known_redteam: int
+    n_windows: int
+    first_event_seconds: int
+    last_event_seconds: int
+    auth_types: list[str]
+    edge_first_seen_seconds: int
+    first_observed_in_range: bool
+    is_local: bool
+    sample_events: list[EdgeEvent]
+
+
+class GraphPrincipal(BaseModel):
+    principal_id: str
+    label: str
+    hop: int
+    n_edges: int
+    n_events: int
+    n_known_redteam: int
+
+
+class Subgraph(BaseModel):
+    provenance: Provenance
+    focus: str
+    start_seconds: int
+    end_seconds: int
+    hops: int
+    max_edges: int
+    hub_max_principals: int
+    n_edges_total: int
+    truncated: bool
+    truncation_order: str
+    semantics: str
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    principals: list[GraphPrincipal]
+
+
+class WindowScore(BaseModel):
+    score: float
+    threshold: float
+    flagged: bool
+    rank: int
+
+
+class GraphWindowSummary(BaseModel):
+    window_id: str
+    principal: str
+    principal_id: str
+    split: str
+    window_start: int
+    window_end: int
+    day: int
+    label: Literal["known_redteam", "unlabeled"]
+    n_labeled_events: int
+    scores: dict[str, WindowScore]
+
+
+class GraphWindowIndex(BaseModel):
+    provenance: Provenance
+    split: str
+    selection: str
+    windows: list[GraphWindowSummary]
+
+
+class GraphWindow(BaseModel):
+    provenance: Provenance
+    window: GraphWindowSummary
+    graph: Subgraph
+
+
+class SplitWindows(BaseModel):
+    split: str
+    n_windows: int
+    n_known_positive_windows: int
+
+
+class EntityWindow(BaseModel):
+    window_id: str
+    window_start: int
+    score: float
+    flagged: bool
+    known_redteam: bool
+
+
+class EntityModelWindows(BaseModel):
+    model_id: str
+    display_name: str
+    split: str
+    n_windows: int
+    alerts: int
+    top_windows: list[EntityWindow]
+
+
+class EntityLink(BaseModel):
+    entity_id: str
+    label: str
+    n_events: int
+    n_known_redteam: int
+    first_seen_seconds: int
+    last_seen_seconds: int
+
+
+class EntityDetail(BaseModel):
+    provenance: Provenance
+    entity_id: str
+    entity_type: Literal["principal", "computer"]
+    label: str
+    scope: str
+    first_seen_seconds: int
+    last_seen_seconds: int
+    n_events: int
+    n_fail: int
+    n_known_redteam_events: int
+    # principals
+    n_active_windows: int | None = None
+    n_distinct_src_computers: int | None = None
+    n_distinct_dst_computers: int | None = None
+    windows_by_split: list[SplitWindows] = []
+    model_windows: list[EntityModelWindows] = []
+    # computers
+    n_distinct_principals: int | None = None
+    in_degree: int | None = None
+    out_degree: int | None = None
+    n_local_events: int | None = None
+    top_links: list[EntityLink]
+    n_links_total: int
 
 
 class Health(BaseModel):

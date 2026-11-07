@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { api, useLoad } from "@/lib/data";
 import { relTime, score as fmtScore, windowLabel } from "@/lib/format";
 import type { EvalSplit } from "@/lib/types";
@@ -26,6 +27,12 @@ export function ExplanationView({ modelId, split, windowId }: { modelId: string;
         <span className="text-sm text-ink-2">{windowLabel(e.window_start, e.window_end)}</span>
         <AlertBadge flagged={e.flagged} />
         {e.label === "known_redteam" ? <KnownRedteamBadge count={e.n_labeled_events} /> : <UnlabeledBadge />}
+        <Link
+          href={`/threatgraph/explorer/?window=${encodeURIComponent(e.window_id)}&model=${encodeURIComponent(modelId)}`}
+          className="ml-auto text-xs text-ink-2 underline decoration-line underline-offset-2 hover:text-ink"
+        >
+          Open in network explorer →
+        </Link>
       </div>
       <p className="text-sm text-ink-2">
         Score <span className="font-mono text-ink">{fmtScore(e.score)}</span> vs threshold{" "}

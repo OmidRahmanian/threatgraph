@@ -49,14 +49,16 @@ export default function OverviewPage() {
               from stored held-out scores. Inspect any alert&apos;s evidence.
             </p>
           </Link>
-          <div className="rounded-xl border border-dashed border-line p-5" aria-disabled="true">
-            <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-ink-3">
-              Explore network <PhaseTag phase="Phase 3" />
-            </div>
-            <p className="mt-2 text-sm text-ink-3">
-              Interactive user/computer graph with evidence-backed edges. Planned; no graph view exists yet.
+          <Link
+            href="/threatgraph/explorer"
+            className="group rounded-xl border border-line bg-panel p-5 transition-colors hover:border-model"
+          >
+            <div className="text-sm font-semibold text-ink">Explore the network →</div>
+            <p className="mt-2 text-sm text-ink-2">
+              See which computers an alerted account moved between in that hour, with every edge backed by its
+              authentication events and every known red-team edge marked.
             </p>
-          </div>
+          </Link>
           <div className="rounded-xl border border-dashed border-line p-5" aria-disabled="true">
             <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-ink-3">
               Replay a case <PhaseTag phase="Phase 4" />

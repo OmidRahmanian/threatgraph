@@ -28,8 +28,8 @@ depth, statistically rigorous evaluation, and honest presentation.
 |---|---|---|
 | 0 | Inspect environment, plan, scaffold | Done |
 | 1 | Synthetic fixture → typed parsing → causal features → M0 + M1 → persisted predictions and evaluation → API → overview + working Experiment Lab → tests | **Done** |
-| 2 | LANL streaming import, DQ report, red-team matching, real-data evaluation | Importer, DQ report and join done (shared with Phase 1). **Not yet run on real files**; needs the user's download |
-| 3 | Entity graph, graph/novelty features, explorer, bounded graph API, graph-feature ablation | Not started |
+| 2 | LANL streaming import, DQ report, red-team matching, real-data evaluation | Everything that can be done without the files is done: chunked bounded-memory features and graph, split suggestion from red-team days, capped score tables, real-data-mode e2e test with alias leak check, scale rehearsal, runbook (`docs/real_data.md`). **Not yet run on real files**, which needs the user's download |
+| 3 | Entity graph, graph/novelty features, explorer, bounded graph API, graph-feature ablation | **Done** on the synthetic demo (`docs/graph.md`) |
 | 4 | Evidence-linked replay, model cards, incident write-ups, methodology page, deployment | Partly: model card in the Lab, CI and deploy docs. Replay and methodology page not started |
 | 5 | Flows/DNS/proc, drift monitor, block-bootstrap CIs, supervised model, GNN | Not started (optional) |
 
@@ -37,15 +37,15 @@ depth, statistically rigorous evaluation, and honest presentation.
 
 Implemented: `health`, `metadata`, `summary`, `models`, `models/{id}/metrics`,
 `models/{id}/scores`, `models/{id}/predictions`, `models/{id}/explanations/{window_id}`,
-`events`, `benchmarks`.
-Planned (not registered, so they cannot be mistaken for working): `graph`,
-`entities/{id}`, `incidents`, `incidents/{id}`, `drift`.
+`events`, `benchmarks`, `graph`, `graph/windows`, `graph/windows/{window_id}`,
+`entities/{entity_id}`.
+Planned (not registered, so they cannot be mistaken for working): `incidents`,
+`incidents/{id}`, `drift`.
 
 ## Deviations from the suggested layout
 
-- One Python distribution (`packages/threatgraph/{data,ml,serving}`) instead of separate
-  `packages/data|ml|graph` projects, because the stages share schemas and config. `graph/` is
-  added in Phase 3.
+- One Python distribution (`packages/threatgraph/{data,graph,ml,serving}`) instead of
+  separate `packages/data|ml|graph` projects, because the stages share schemas and config.
 - Playwright specs live in `apps/web/e2e/` (they must resolve the web package's
   `node_modules`); `tests/e2e/README.md` points there.
 - The scoring unit is a (source principal, 1-hour window), not a single event. Labels are

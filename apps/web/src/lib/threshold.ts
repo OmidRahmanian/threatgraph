@@ -19,7 +19,16 @@ export interface ThresholdMetrics {
   alertsPerDay: number | null;
 }
 
-export function thresholdMetrics(rows: readonly ScoreRow[], threshold: number, nDays: number): ThresholdMetrics {
+/**
+ * `totals` covers rows a truncated table left out (all of them score at or below its
+ * `exact_above` cutoff), so results are exact for thresholds above that cutoff.
+ */
+export function thresholdMetrics(
+  rows: readonly ScoreRow[],
+  threshold: number,
+  nDays: number,
+  totals?: { rows: number; knownPositives: number },
+): ThresholdMetrics {
   let tp = 0;
   let fp = 0;
   let positives = 0;
@@ -32,8 +41,9 @@ export function thresholdMetrics(rows: readonly ScoreRow[], threshold: number, n
       fp += 1;
     }
   }
+  if (totals) positives = totals.knownPositives;
   const alerts = tp + fp;
-  const total = rows.length;
+  const total = totals ? totals.rows : rows.length;
   return {
     threshold,
     alerts,

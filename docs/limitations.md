@@ -5,8 +5,10 @@
    score well on it. The synthetic numbers show that the pipeline, evaluation and UI work end
    to end, nothing more.
 2. **Real LANL data has not been run yet.** The importer follows the published schema and is
-   tested on LANL-format fixtures. Real files may hold surprises (encodings, unexpected tokens)
-   that the data-quality report will surface.
+   tested on LANL-format fixtures, and the whole pipeline is tested in real-data mode. Real
+   files may hold surprises (encodings, unexpected tokens) that the data-quality report will
+   surface. Memory use on LANL is extrapolated from a synthetic scale rehearsal, not measured
+   (`docs/real_data.md`).
 3. **Labels are incomplete.** Unlabeled ≠ benign. Precision is a lower bound and recall covers
    only documented activity. The LANL red-team file covers authentication events only.
 4. **Red-team key choice.** Matching uses the *source* principal by default. This is a
@@ -25,3 +27,11 @@
     multi-replica deployment.
 11. **Docker** files are written, but the image build has not been verified in this
     environment.
+12. **Graph scope.** Machine accounts and LogOff events are not in the graph, so it cannot show
+    activity that only appears under machine accounts. Hub computers are not expanded at hop
+    2, so activity hidden among a hub's many accounts is not drawn.
+13. **Graph features on the demo** were designed knowing the fixture contains pivots, so the
+    M1 vs M3 gain on synthetic data is expected by construction.
+14. **Static explorer coverage.** The static site precomputes graphs only for each model's top
+    40 test windows and every known red-team test window, and entity details only at hops 0–1.
+    The live API serves any of them.

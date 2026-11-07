@@ -73,10 +73,30 @@ def cmd_ingest(args: argparse.Namespace) -> None:
                 )
             }
         )
+        from threatgraph.data.splits import suggest_splits, yaml_snippet
+
         _, report = ingest_redteam(unbounded, cfg.processed_path / "inspect")
-        _print(
-            {"records_total": report["records_total"], "records_by_day": report["records_by_day"]}
+        by_day = {int(k): v for k, v in report["records_by_day"].items()}
+        s = cfg.splits
+        suggestion = suggest_splits(
+            by_day,
+            warmup_days=round(s.warmup_end_day),
+            train_days=round(s.train_end_day - s.warmup_end_day),
+            validation_days=round(s.validation_end_day - s.train_end_day),
+            test_days=round(s.test_end_day - s.validation_end_day),
         )
+        _print(
+            {
+                "records_total": report["records_total"],
+                "records_by_day": report["records_by_day"],
+                "split_suggestion": suggestion,
+            }
+        )
+        if suggestion["ok"]:
+            print(
+                f"\nTo use it, set these two lines under `{cfg.name}:` in configs/datasets.yaml:\n"
+                + yaml_snippet(suggestion["suggestion"])
+            )
         return
     report = pipeline.run_ingest(cfg)
     auth = report["auth"]
@@ -100,6 +120,11 @@ def cmd_features(args: argparse.Namespace) -> None:
         cmd_ingest(argparse.Namespace(dataset=args.dataset, inspect_redteam=False))
     manifest = pipeline.run_features(cfg)
     _print({"n_rows": manifest["n_rows"], "splits": manifest["splits"]})
+
+
+def cmd_graph(args: argparse.Namespace) -> None:
+    m = pipeline.run_graph(_dataset(args.dataset))
+    _print({k: m[k] for k in ("edge_rows", "events_in_graph", "principals", "computers")})
 
 
 def cmd_train(args: argparse.Namespace) -> None:
@@ -129,7 +154,7 @@ def cmd_export(args: argparse.Namespace) -> None:
 def cmd_all(args: argparse.Namespace) -> None:
     if args.dataset == "demo" and not _dataset("demo").raw_file("auth").exists():
         cmd_generate(argparse.Namespace(seed=args.seed))
-    for fn in (cmd_ingest, cmd_features, cmd_train, cmd_evaluate, cmd_export):
+    for fn in (cmd_ingest, cmd_features, cmd_graph, cmd_train, cmd_evaluate, cmd_export):
         fn(argparse.Namespace(dataset=args.dataset, inspect_redteam=False, out=None))
 
 
@@ -142,6 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
     for name, fn, help_ in (
         ("ingest", cmd_ingest, "parse raw files into Parquet + data-quality report"),
         ("features", cmd_features, "build causal window features"),
+        ("graph", cmd_graph, "build the entity graph tables"),
         ("train", cmd_train, "fit models and persist scores"),
         ("evaluate", cmd_evaluate, "compute held-out metrics"),
         ("export", cmd_export, "write the static website bundle"),

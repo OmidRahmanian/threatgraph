@@ -79,6 +79,12 @@ per-principal features. They still count toward global computer-edge novelty.
 | `max_burst` | max events in any 5-minute sub-window |
 | `z_events`, `z_distinct_dst` | `(x − mean) / (std + 1)` over the principal's previous ≤ 24 active windows; 0 with no history |
 | `log_prior_windows` | `log(1 + #earlier active windows)` (cold start indicator) |
+| `n_rare_dst` | graph: distinct destinations in the window that no *other* in-scope account had first reached in an earlier window |
+| `n_pivot_src` | graph: distinct source computers of remote events (src ≠ dst) that this account had itself reached as a remote destination earlier, within `pivot_lookback_seconds` (24 h) |
+
+Features are built in time chunks (`features.chunk_seconds`) with first-seen sets, last
+outcomes and recent arrivals carried between chunks. Output is identical for any chunk size
+(`test_chunk_size_does_not_change_features`).
 
 Identifier columns (`window_id`, `src_principal`, `window_start`, `window_end`, `day`, `split`)
 and label columns (`label`, `n_labeled_events`, `first_labeled_event_seconds`) are kept
