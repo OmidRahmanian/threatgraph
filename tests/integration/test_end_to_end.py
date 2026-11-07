@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 from pathlib import Path
 
@@ -97,7 +98,11 @@ def test_api_matches_static_export(built) -> None:
     wid = index["windows"][0]["window_id"]
     graph = json.loads((out / f"graph/windows/{static_slug(wid)}.json").read_text())
     eid = graph["graph"]["nodes"][0]["node_id"]
+    incidents = json.loads((out / "incidents/index.json").read_text())
+    iid = incidents["incidents"][0]["incident_id"]
     routes |= {
+        "incidents/index.json": "/api/v1/incidents",
+        f"incidents/{static_slug(iid)}.json": f"/api/v1/incidents/{iid}",
         "graph/windows/test/index.json": "/api/v1/graph/windows?split=test",
         f"graph/windows/{static_slug(wid)}.json": f"/api/v1/graph/windows/{wid}",
         f"entities/{static_slug(eid)}.json": f"/api/v1/entities/{eid}",
@@ -224,3 +229,63 @@ def test_graph_api_bounds(built) -> None:
     capped = client.get(ok + "&hops=2&max_edges=3").json()
     assert len(capped["edges"]) <= 3
     assert capped["n_edges_total"] >= len(capped["edges"])
+
+
+def test_incidents_are_grounded_and_match_lab_latency(built) -> None:
+    """Incidents come from labels; their detection numbers agree with metrics.json."""
+    cfg, _, ctx, bundle, client = built
+    out = Path(bundle["out_dir"])
+    labels = set(ctx.labeled_event_ids)
+    every = client.get("/api/v1/incidents?scope=all").json()["incidents"]
+    # Every labeled in-scope event belongs to exactly one incident.
+    covered: list[int] = []
+    for s in every:
+        inc = client.get(f"/api/v1/incidents/{s['incident_id']}").json()
+        hop_ids = [h["event_id"] for h in inc["hops"]]
+        assert set(hop_ids) <= labels and len(hop_ids) == s["n_labeled_events"]
+        covered += hop_ids
+        times = [h["event_time_seconds"] for h in inc["hops"]]
+        assert times == sorted(times) and times[0] == s["start_seconds"]
+        assert all(b - a <= cfg.incidents.gap_seconds for a, b in itertools.pairwise(times))
+        shown = {e["event_id"] for e in inc["events"]}
+        assert set(hop_ids) <= shown, "labeled events are never truncated away"
+        for e in inc["events"]:
+            assert e["src_principal"] == s["principal"]
+            assert inc["range_start_seconds"] <= e["event_time_seconds"] < inc["range_end_seconds"]
+            assert e["known_redteam"] == (e["event_id"] in labels)
+        assert str(s["n_labeled_events"]) in inc["writeup"][0]
+    assert sorted(covered) == sorted(labels)
+
+    # Test-split incidents: same latency as the Lab's per-account detection latency.
+    index = json.loads((out / "incidents/index.json").read_text())
+    assert {s["split"] for s in index["incidents"]} <= {"validation", "test"}
+    for model_id in ctx.mcfg.models:
+        lab = {
+            r["principal"]: r
+            for r in ctx.model_metrics(model_id).model_dump()["splits"]["test"]["detection_latency"]
+        }
+        for s in (x for x in index["incidents"] if x["split"] == "test"):
+            d = next(d for d in s["detections"] if d["model_id"] == model_id)
+            row = lab[s["principal"]]
+            assert d["latency_seconds"] == row["latency_seconds"], (model_id, s["principal"])
+            assert d["alerted_labeled_windows"] == row["alerted_known_positive_windows"]
+            assert d["labeled_windows"] == row["known_positive_windows"]
+
+
+def test_downloads_match_metrics(built) -> None:
+    _, mcfg, ctx, bundle, _ = built
+    out = Path(bundle["out_dir"])
+    lines = (out / "downloads/model_comparison.csv").read_text().splitlines()
+    assert lines[0].startswith("# Synthetic demo")
+    import csv
+
+    rows = list(csv.DictReader(lines[1:]))
+    assert len(rows) == 2 * len(mcfg.models)
+    for r in rows:
+        stored = ctx.metrics["models"][r["model_id"]]["splits"][r["split"]]
+        assert int(r["alerts"]) == stored["operating_point"]["alerts"]
+        assert float(r["average_precision"]) == stored["average_precision"]
+    for m in mcfg.models:
+        card = (out / f"downloads/model_cards/{m}.md").read_text()
+        assert "Synthetic demo" in card and "labels used: no" in card
+    assert "## " in (out / "downloads/incident_writeups.md").read_text()

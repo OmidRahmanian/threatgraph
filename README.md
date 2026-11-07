@@ -9,13 +9,14 @@ behavioral and graph features, scores each account-hour with a statistical basel
 Isolation Forests (with and without graph features), evaluates them on a strict chronological
 split against red-team labels, and shows the results in a web app. In the app you can move the
 alert threshold, see metrics recompute from the stored held-out scores, inspect the raw events
-behind any alert, and explore which computers an alerted account moved between.
+behind any alert, explore which computers an alerted account moved between, and replay
+documented red-team incidents against each model's alerts.
 
-> **Status: Phases 1 and 3 complete; Phase 2 ready but not run on real data.** The demo runs on
-> a **deterministic synthetic fixture** and is labeled *Synthetic demo* everywhere. Real LANL
-> mode is tested end to end on LANL-format data but has **not** been run on the real files
-> (they need LANL's data-use form), so no real-data performance is claimed. Incident replay
-> (Phase 4) is not built; the UI marks it that way. See [What's implemented](#whats-implemented).
+> **Status: Phases 1, 3 and 4 complete; Phase 2 ready but not run on real data.** The demo runs
+> on a **deterministic synthetic fixture** and is labeled *Synthetic demo* everywhere. Real
+> LANL mode is tested end to end on LANL-format data but has **not** been run on the real files
+> (they need LANL's data-use form), so no real-data performance is claimed. Optional Phase 5
+> extensions are not started. See [What's implemented](#whats-implemented).
 
 ## Quick start
 
@@ -55,7 +56,8 @@ make test        # pytest (unit + integration) + vitest
 make lint        # ruff check/format, eslint
 make typecheck   # mypy + tsc
 make e2e         # Playwright on desktop + mobile against the static build
-make benchmark   # in-process API latency → artifacts/demo/reports/api_benchmark.json
+make benchmark   # in-process API latency → artifacts/demo/reports/api_benchmark.json, then re-export
+make docker      # read-only API + nginx in containers (see docs/deployment.md)
 ```
 
 ## Using the real LANL data
@@ -92,10 +94,12 @@ Details, the real-data-mode guarantees and a scale rehearsal: [docs/real_data.md
 | Website: overview + ML Experiment Lab (threshold slider, PR curve, score distribution, ranked windows, evidence viewer, model card, ablation) | ✅ |
 | Entity graph tables, bounded graph/entity API, graph features, M3 + M1-vs-M3 ablation | ✅ (ablation not blind on the demo) |
 | Network explorer: window list, directed graph, edge evidence, entity panel, table view | ✅ |
+| Incident API, replay page (alerts revealed at window end), generated write-ups | ✅ |
+| Methodology page, model cards (Markdown), comparison CSV, API latency in the site | ✅ |
+| Docker stack (read-only API + nginx) verified locally; CI Docker smoke-test job | ✅ |
 | Bounded-memory chunked features/graph, split suggestion, capped score tables, real-data-mode test, scale rehearsal | ✅ |
-| CI workflow, Dockerfile/compose | ✅ written · ⚠️ Docker build not yet verified |
+| CI workflow (Python, web + e2e, Docker smoke test) | ✅ written · not yet run on GitHub |
 | Run on real LANL data | ⏳ pipeline ready, not yet run (needs your download) |
-| Incident replay, methodology page | ⏳ Phase 4 |
 | Flows/DNS/process, drift monitor, bootstrap CIs, supervised model | ⏳ Phase 5 (optional) |
 
 ## Architecture
@@ -123,11 +127,13 @@ data/raw/lanl/*.txt.gz ─┴─> ingest ─> features ─> train ─> evaluate 
 
 Results are never typed into docs by hand. `scripts/evaluate.py` writes
 `artifacts/<dataset>/reports/evaluation.md`, and the website reads the same `metrics.json`.
+The exporter also writes `model_comparison.csv`, `model_cards/*.md` and
+`incident_writeups.md` to `artifacts/<dataset>/reports/` and to the site's `downloads/`.
 
 ## Embedding in a personal website
 
 The UI is a self-contained route segment (`/threatgraph`, `/threatgraph/lab`,
-`/threatgraph/explorer`) built as static
+`/threatgraph/explorer`, `/threatgraph/replay`, `/threatgraph/methodology`) built as static
 files. Set `NEXT_PUBLIC_BASE_PATH=/projects` (for example), run `npm run build`, and copy
 `apps/web/out/` to that path on your host. See [docs/deployment.md](docs/deployment.md).
 

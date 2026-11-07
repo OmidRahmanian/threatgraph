@@ -32,6 +32,7 @@ class SplitInfo(BaseModel):
 class FeatureInfo(BaseModel):
     name: str
     description: str
+    group: str
 
 
 class Metadata(BaseModel):
@@ -303,6 +304,8 @@ class Benchmarks(BaseModel):
     processed_bytes: dict[str, int]
     export_payload_bytes: int | None
     library_versions: dict[str, str]
+    # From `make benchmark` (artifacts/<ds>/reports/api_benchmark.json); null if never run.
+    api_latency: dict[str, Any] | None = None
 
 
 class EdgeEvent(BaseModel):
@@ -462,6 +465,80 @@ class EntityDetail(BaseModel):
     n_local_events: int | None = None
     top_links: list[EntityLink]
     n_links_total: int
+
+
+class IncidentScore(BaseModel):
+    score: float
+    threshold: float
+    flagged: bool
+
+
+class IncidentWindow(BaseModel):
+    window_id: str
+    window_start: int
+    window_end: int
+    split: str
+    label: Literal["known_redteam", "unlabeled"]
+    n_labeled_events: int
+    scores: dict[str, IncidentScore]
+
+
+class IncidentDetection(BaseModel):
+    model_id: str
+    display_name: str
+    # detected: a labeled window was alerted; missed: none was; not_scored: no labeled window
+    # falls in a scored split (e.g. the incident is in the warm-up period).
+    status: Literal["detected", "missed", "not_scored"]
+    first_alert_seconds: int | None  # end of the first alerted labeled window
+    latency_seconds: int | None  # first labeled event -> first_alert_seconds
+    labeled_windows: int
+    alerted_labeled_windows: int
+    alerted_windows_in_range: int
+    max_labeled_score: float | None
+    threshold: float
+
+
+class IncidentHop(BaseModel):
+    event_id: int
+    event_time_seconds: int
+    src_computer: str | None
+    dst_computer: str | None
+    auth_type: str | None
+    outcome: str | None
+
+
+class IncidentSummary(BaseModel):
+    incident_id: str
+    principal: str
+    principal_id: str
+    split: str
+    start_seconds: int
+    end_seconds: int
+    n_labeled_events: int
+    n_computers: int
+    detections: list[IncidentDetection]
+
+
+class IncidentIndex(BaseModel):
+    provenance: Provenance
+    scope: str
+    definition: str
+    incidents: list[IncidentSummary]
+
+
+class Incident(BaseModel):
+    provenance: Provenance
+    summary: IncidentSummary
+    definition: str
+    range_start_seconds: int
+    range_end_seconds: int
+    hops: list[IncidentHop]
+    events: list[AuthEvent]
+    n_events_total: int
+    events_truncated: bool
+    windows: list[IncidentWindow]
+    writeup: list[str]
+    caveats: list[str]
 
 
 class Health(BaseModel):

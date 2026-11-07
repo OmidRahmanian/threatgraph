@@ -13,6 +13,10 @@ The file layout mirrors the API routes under `/api/v1`, so the website can read 
     graph/windows/{split}/index.json       GET /api/v1/graph/windows?split=
     graph/windows/{slug}.json              GET /api/v1/graph/windows/{window_id}
     entities/{slug}.json                   GET /api/v1/entities/{entity_id}
+    incidents/index.json                   GET /api/v1/incidents (scope=evaluated)
+    incidents/{slug}.json                  GET /api/v1/incidents/{incident_id}
+    downloads/*                            CSV/Markdown files (no API equivalent); also
+                                           written to artifacts/<ds>/reports/
 
 `slug` is the id with every character outside [A-Za-z0-9._-] replaced by "_"
 (apps/web/src/lib/data.ts uses the same rule). Only entities that appear in an exported
@@ -29,6 +33,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from threatgraph.pipeline import EVAL_SPLITS
+from threatgraph.serving.downloads import downloads
 from threatgraph.serving.payloads import ServingContext
 
 EXPORT_PREDICTION_LIMIT = 100
@@ -86,9 +91,23 @@ def export_bundle(ctx: ServingContext, out_dir: Path) -> dict[str, Any]:
         if slugs.setdefault(slug, e) != e:
             raise RuntimeError(f"static slug collision: {e} vs {slugs[slug]}")
         put(f"entities/{slug}.json", ctx.entity(e))
-    total = sum(sizes.values())
+    incidents = ctx.incident_index("evaluated")
+    put("incidents/index.json", incidents)
+    for inc in incidents.incidents:
+        slug = static_slug(inc.incident_id)
+        if slugs.setdefault(slug, inc.incident_id) != inc.incident_id:
+            raise RuntimeError(f"static slug collision: {inc.incident_id} vs {slugs[slug]}")
+        put(f"incidents/{slug}.json", ctx.incident(inc.incident_id))
+    download_sizes: dict[str, int] = {}
+    reports = ctx.cfg.artifacts_path / "reports"
+    for rel, text in downloads(ctx).items():
+        for root in (out_dir / "downloads", reports):
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(text)
+        download_sizes[f"downloads/{rel}"] = len(text.encode())
+    total = sum(sizes.values()) + sum(download_sizes.values())
     put("benchmarks.json", ctx.benchmarks(export_payload_bytes=total))
-    total = sum(sizes.values())
+    total = sum(sizes.values()) + sum(download_sizes.values())
     big = {k: v for k, v in sizes.items() if v > MAX_FILE_BYTES}
     if big:
         raise RuntimeError(f"export files over the {MAX_FILE_BYTES} byte per-file cap: {big}")
@@ -96,4 +115,9 @@ def export_bundle(ctx: ServingContext, out_dir: Path) -> dict[str, Any]:
         raise RuntimeError(
             f"export bundle is {total} bytes, over the {MAX_BUNDLE_BYTES} byte budget"
         )
-    return {"out_dir": str(out_dir), "files": sizes, "total_bytes": total}
+    return {
+        "out_dir": str(out_dir),
+        "files": sizes,
+        "downloads": download_sizes,
+        "total_bytes": total,
+    }

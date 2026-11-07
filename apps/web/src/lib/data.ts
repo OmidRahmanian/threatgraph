@@ -14,6 +14,8 @@ import type {
   ExplanationBundle,
   GraphWindow,
   GraphWindowIndex,
+  Incident,
+  IncidentIndex,
   Metadata,
   ModelList,
   ModelMetrics,
@@ -28,6 +30,8 @@ const STATIC_BASE = `${BASE_PATH}/threatgraph-data/${DATASET}/v1`;
 
 export const dataSourceLabel = API_BASE ? "Live API" : "Static export";
 export const isLiveApi = Boolean(API_BASE);
+/** Plain files (CSV/Markdown) written by the exporter; they have no API equivalent. */
+export const downloadUrl = (rel: string) => `${STATIC_BASE}/downloads/${rel}`;
 
 /** Static file name for an id: same rule as threatgraph.serving.export.static_slug. */
 export function staticSlug(id: string): string {
@@ -92,6 +96,9 @@ export const api = {
   /** Resolves to null when the static export did not include this entity (hop-2 entities). */
   entity: (entityId: string) =>
     getJsonOrNull<EntityDetail>(route(`/entities/${encodeURIComponent(entityId)}`, `entities/${staticSlug(entityId)}.json`)),
+  incidents: () => getJson<IncidentIndex>(route("/incidents", "incidents/index.json")),
+  incident: (id: string) =>
+    getJsonOrNull<Incident>(route(`/incidents/${encodeURIComponent(id)}`, `incidents/${staticSlug(id)}.json`)),
   explanationsAvailable: async (id: string, split: EvalSplit): Promise<Set<string> | "all"> => {
     if (API_BASE) return "all";
     if (split !== "test") return new Set();

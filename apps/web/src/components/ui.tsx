@@ -101,10 +101,6 @@ export function Callout({ title, children, tone = "neutral" }: { title: string; 
   );
 }
 
-export function PhaseTag({ phase }: { phase: string }) {
-  return <span className="rounded-full border border-dashed border-line px-2 py-0.5 text-[11px] text-ink-3">Not built yet · {phase}</span>;
-}
-
 export function LoadingBlock({ label = "Loading…" }: { label?: string }) {
   return (
     <div className="animate-pulse rounded-lg border border-line bg-panel-2 px-4 py-6 text-sm text-ink-3" role="status">

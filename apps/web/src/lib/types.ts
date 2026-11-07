@@ -36,7 +36,7 @@ export interface Metadata {
   label_semantics: string;
   splits: SplitInfo[];
   feature_set: string;
-  features: { name: string; description: string }[];
+  features: { name: string; description: string; group: string }[];
   model_ids: string[];
   implemented_views: string[];
 }
@@ -236,6 +236,11 @@ export interface Benchmarks {
   processed_bytes: Record<string, number>;
   export_payload_bytes: number | null;
   library_versions: Record<string, string>;
+  api_latency: {
+    dataset: string;
+    repeats: number;
+    endpoints: Record<string, { url: string; p50_ms: number; p95_ms: number; response_bytes: number }>;
+  } | null;
 }
 
 export interface EdgeEvent {
@@ -375,4 +380,61 @@ export interface EntityDetail {
   n_local_events: number | null;
   top_links: EntityLink[];
   n_links_total: number;
+}
+
+export interface IncidentDetection {
+  model_id: string;
+  display_name: string;
+  status: "detected" | "missed" | "not_scored";
+  first_alert_seconds: number | null;
+  latency_seconds: number | null;
+  labeled_windows: number;
+  alerted_labeled_windows: number;
+  alerted_windows_in_range: number;
+  max_labeled_score: number | null;
+  threshold: number;
+}
+
+export interface IncidentSummary {
+  incident_id: string;
+  principal: string;
+  principal_id: string;
+  split: string;
+  start_seconds: number;
+  end_seconds: number;
+  n_labeled_events: number;
+  n_computers: number;
+  detections: IncidentDetection[];
+}
+
+export interface IncidentIndex {
+  provenance: Provenance;
+  scope: string;
+  definition: string;
+  incidents: IncidentSummary[];
+}
+
+export interface IncidentWindow {
+  window_id: string;
+  window_start: number;
+  window_end: number;
+  split: string;
+  label: "known_redteam" | "unlabeled";
+  n_labeled_events: number;
+  scores: Record<string, { score: number; threshold: number; flagged: boolean }>;
+}
+
+export interface Incident {
+  provenance: Provenance;
+  summary: IncidentSummary;
+  definition: string;
+  range_start_seconds: number;
+  range_end_seconds: number;
+  hops: { event_id: number; event_time_seconds: number; src_computer: string | null; dst_computer: string | null; auth_type: string | null; outcome: string | null }[];
+  events: AuthEvent[];
+  n_events_total: number;
+  events_truncated: boolean;
+  windows: IncidentWindow[];
+  writeup: string[];
+  caveats: string[];
 }

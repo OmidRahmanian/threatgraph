@@ -30,7 +30,7 @@ depth, statistically rigorous evaluation, and honest presentation.
 | 1 | Synthetic fixture → typed parsing → causal features → M0 + M1 → persisted predictions and evaluation → API → overview + working Experiment Lab → tests | **Done** |
 | 2 | LANL streaming import, DQ report, red-team matching, real-data evaluation | Everything that can be done without the files is done: chunked bounded-memory features and graph, split suggestion from red-team days, capped score tables, real-data-mode e2e test with alias leak check, scale rehearsal, runbook (`docs/real_data.md`). **Not yet run on real files**, which needs the user's download |
 | 3 | Entity graph, graph/novelty features, explorer, bounded graph API, graph-feature ablation | **Done** on the synthetic demo (`docs/graph.md`) |
-| 4 | Evidence-linked replay, model cards, incident write-ups, methodology page, deployment | Partly: model card in the Lab, CI and deploy docs. Replay and methodology page not started |
+| 4 | Evidence-linked replay, model cards, incident write-ups, methodology page, deployment | **Done**: incident API and replay page, generated write-ups, model cards (Lab and Markdown), comparison CSV, methodology page with benchmarks, CI with a Docker smoke-test job, Docker stack verified locally |
 | 5 | Flows/DNS/proc, drift monitor, block-bootstrap CIs, supervised model, GNN | Not started (optional) |
 
 ## API contract (v1)
@@ -38,9 +38,8 @@ depth, statistically rigorous evaluation, and honest presentation.
 Implemented: `health`, `metadata`, `summary`, `models`, `models/{id}/metrics`,
 `models/{id}/scores`, `models/{id}/predictions`, `models/{id}/explanations/{window_id}`,
 `events`, `benchmarks`, `graph`, `graph/windows`, `graph/windows/{window_id}`,
-`entities/{entity_id}`.
-Planned (not registered, so they cannot be mistaken for working): `incidents`,
-`incidents/{id}`, `drift`.
+`entities/{entity_id}`, `incidents`, `incidents/{incident_id}`.
+Planned (not registered, so they cannot be mistaken for working): `drift`.
 
 ## Deviations from the suggested layout
 

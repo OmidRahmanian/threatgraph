@@ -7,10 +7,11 @@ import { api, dataSourceLabel, useLoad } from "@/lib/data";
 import { ProvenanceBadge } from "./ui";
 
 const NAV = [
-  { href: "/threatgraph", label: "Overview", built: true },
-  { href: "/threatgraph/lab", label: "Experiment Lab", built: true },
-  { href: "/threatgraph/explorer", label: "Network explorer", built: true },
-  { href: null, label: "Incident replay", built: false, phase: "Phase 4" },
+  { href: "/threatgraph", label: "Overview" },
+  { href: "/threatgraph/lab", label: "Experiment Lab" },
+  { href: "/threatgraph/explorer", label: "Network explorer" },
+  { href: "/threatgraph/replay", label: "Incident replay" },
+  { href: "/threatgraph/methodology", label: "Methodology" },
 ] as const;
 
 function ThemeToggle() {
@@ -59,30 +60,18 @@ export function Shell({ children }: { children: React.ReactNode }) {
             ThreatGraph AI
           </Link>
           <nav aria-label="ThreatGraph sections" className="order-3 flex w-full gap-1 overflow-x-auto sm:order-none sm:w-auto">
-            {NAV.map((item) =>
-              item.built ? (
-                <Link
-                  key={item.label}
-                  href={item.href}
-                  aria-current={pathname === item.href ? "page" : undefined}
-                  className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm ${
-                    pathname === item.href ? "bg-panel-2 text-ink" : "text-ink-2 hover:text-ink"
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              ) : (
-                <span
-                  key={item.label}
-                  aria-disabled="true"
-                  title={`${item.label} is not built yet (${item.phase})`}
-                  className="flex cursor-not-allowed items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm text-ink-3"
-                >
-                  {item.label}
-                  <span className="hidden text-[10px] lg:inline">({item.phase})</span>
-                </span>
-              ),
-            )}
+            {NAV.map((item) => (
+              <Link
+                key={item.label}
+                href={item.href}
+                aria-current={pathname === item.href ? "page" : undefined}
+                className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm ${
+                  pathname === item.href ? "bg-panel-2 text-ink" : "text-ink-2 hover:text-ink"
+                }`}
+              >
+                {item.label}
+              </Link>
+            ))}
           </nav>
           <div className="ml-auto flex items-center gap-2">
             <ProvenanceBadge provenance={provenance} />

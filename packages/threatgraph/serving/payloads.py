@@ -34,6 +34,7 @@ from threatgraph.pipeline import (
 )
 from threatgraph.provenance import LABEL_SEMANTICS
 from threatgraph.serving import schemas as S
+from threatgraph.serving.incidents import IncidentBuilder
 
 TIME_SEMANTICS = (
     "LANL-format time is relative seconds from an arbitrary epoch. It is shown as "
@@ -53,7 +54,7 @@ MODEL_DESCRIPTIONS = {
         "without labels. Its score ranks unusualness; it is not a probability of compromise."
     ),
 }
-IMPLEMENTED_VIEWS = ["overview", "lab", "explorer"]
+IMPLEMENTED_VIEWS = ["overview", "lab", "explorer", "replay", "methodology"]
 MAX_EVIDENCE = 40
 # Per-split cap on exported/served score rows (real LANL splits can hold hundreds of thousands).
 SCORE_TABLE_MAX_ROWS = 10_000
@@ -186,6 +187,20 @@ class ServingContext:
             )
         return pl.concat(parts)
 
+    @cached_property
+    def _feature_group(self) -> dict[str, str]:
+        return {f: g for g, fs in self.mcfg.feature_groups.items() for f in fs}
+
+    @cached_property
+    def incident_builder(self) -> IncidentBuilder:
+        return IncidentBuilder(self)
+
+    def incident_index(self, scope: str = "evaluated") -> S.IncidentIndex:
+        return self.incident_builder.index(scope)
+
+    def incident(self, incident_id: str) -> S.Incident:
+        return self.incident_builder.incident(incident_id)
+
     # ------------------------------------------------------------------ identifiers
     def alias(self, ident: str | None) -> str | None:
         if ident is None or not self.alias_ids:
@@ -245,7 +260,8 @@ class ServingContext:
             splits=splits,
             feature_set=self.mcfg.feature_set,
             features=[
-                S.FeatureInfo(name=k, description=v) for k, v in FEATURE_DESCRIPTIONS.items()
+                S.FeatureInfo(name=k, description=v, group=self._feature_group.get(k, "other"))
+                for k, v in FEATURE_DESCRIPTIONS.items()
             ],
             model_ids=list(self.mcfg.models),
             implemented_views=IMPLEMENTED_VIEWS,
@@ -859,6 +875,7 @@ class ServingContext:
             for k, v in runs.items()
         }
         lib = next(iter(runs.values()))["library_versions"] if runs else {}
+        api_bench = self.cfg.artifacts_path / "reports" / "api_benchmark.json"
         return S.Benchmarks(
             provenance=self.provenance,
             stages=stages,
@@ -866,4 +883,5 @@ class ServingContext:
             processed_bytes=sizes,
             export_payload_bytes=export_payload_bytes,
             library_versions=lib,
+            api_latency=json.loads(api_bench.read_text()) if api_bench.exists() else None,
         )

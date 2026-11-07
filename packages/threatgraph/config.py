@@ -67,6 +67,14 @@ class GraphConfig(BaseModel):
     export_max_edges: int = Field(default=60, ge=1, le=300)
 
 
+class IncidentConfig(BaseModel):
+    # Labeled events of one account belong to the same incident while consecutive events are
+    # at most `gap_seconds` apart. Incidents are derived from labels, never from scores.
+    gap_seconds: int = Field(default=86_400, gt=0)
+    context_seconds: int = Field(default=3_600, ge=0)  # unlabeled context shown before/after
+    max_events: int = Field(default=300, ge=10, le=2_000)
+
+
 class SplitConfig(BaseModel):
     warmup_end_day: float
     train_end_day: float
@@ -101,6 +109,7 @@ class DatasetConfig(BaseModel):
     redteam: RedteamConfig = RedteamConfig()
     features: FeatureConfig = FeatureConfig()
     graph: GraphConfig = GraphConfig()
+    incidents: IncidentConfig = IncidentConfig()
     splits: SplitConfig
     seed: int = 42
 

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { OverviewStats } from "@/components/OverviewStats";
-import { PhaseTag } from "@/components/ui";
 
 export const metadata: Metadata = {
   title: "ThreatGraph AI · Overview",
@@ -59,14 +58,16 @@ export default function OverviewPage() {
               authentication events and every known red-team edge marked.
             </p>
           </Link>
-          <div className="rounded-xl border border-dashed border-line p-5" aria-disabled="true">
-            <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-ink-3">
-              Replay a case <PhaseTag phase="Phase 4" />
-            </div>
-            <p className="mt-2 text-sm text-ink-3">
-              Step through a labeled red-team sequence with detection markers. Planned; not built yet.
+          <Link
+            href="/threatgraph/replay"
+            className="group rounded-xl border border-line bg-panel p-5 transition-colors hover:border-model"
+          >
+            <div className="text-sm font-semibold text-ink">Replay an incident →</div>
+            <p className="mt-2 text-sm text-ink-2">
+              Step through documented red-team activity event by event and see when each model would have
+              alerted, with a generated write-up of what happened.
             </p>
-          </div>
+          </Link>
         </div>
       </section>
 

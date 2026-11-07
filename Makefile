@@ -1,7 +1,7 @@
 PY ?= .venv/bin/python
 DATASET ?= demo
 
-.PHONY: setup demo pipeline api web web-build test lint typecheck e2e benchmark ci clean
+.PHONY: setup demo pipeline api web web-build test lint typecheck e2e benchmark docker ci clean
 
 setup:            ## Create the Python venv and install web dependencies
 	uv venv --python 3.12 .venv
@@ -38,8 +38,12 @@ typecheck:
 e2e: web-build    ## Playwright against the static export (run `make demo` first)
 	cd apps/web && npx playwright test
 
-benchmark:
+benchmark:        ## API latency report, then re-export so the site shows it
 	$(PY) scripts/benchmark_api.py --dataset $(DATASET)
+	$(PY) scripts/export_demo.py --dataset $(DATASET)
+
+docker: web-build  ## API + nginx in containers (run `make demo` first); ports via TG_API_PORT/TG_WEB_PORT
+	docker compose up --build
 
 ci: lint typecheck test e2e
 

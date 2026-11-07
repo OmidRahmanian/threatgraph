@@ -1,4 +1,4 @@
-# Entity graph and network explorer (Phase 3)
+# Entity graph, network explorer and incident replay
 
 ## Model
 
@@ -54,3 +54,23 @@ almost no unlabeled window does; group `features/windows.parquet` by `label` to 
 gain over M1 on the demo is therefore expected and is not evidence that the feature helps on
 real data. Real admins also log on to one server and hop from it, so on LANL the feature may
 mostly flag benign administration.
+
+## Incidents and replay (Phase 4)
+
+`packages/threatgraph/serving/incidents.py` groups red-team-matched events by source account
+into incidents. A new incident starts after a gap longer than `incidents.gap_seconds` (24 h by
+default). For each incident it builds:
+
+- the account's events from one window before the first labeled event to one window after the
+  last one. Every labeled event is kept; other events fill the `max_events` budget, remote ones
+  first;
+- every scored window in that range with each model's score and alert;
+- per-model detection: `detected` if a window containing a labeled event was alerted, with
+  latency = end of the first such window − first labeled event (the Lab's definition, and a
+  test checks they agree); `missed`; or `not_scored`;
+- a write-up filled in from those numbers by fixed templates.
+
+`GET /api/v1/incidents?scope=evaluated|all` and `GET /api/v1/incidents/{incident_id}` serve
+them. The static export includes validation and test incidents. The replay page steps through
+the events and shows each alert only once its window has closed, which is when the score
+would exist.

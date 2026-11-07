@@ -25,8 +25,7 @@
    modeled, deliberately.
 10. **Single-process API** with in-memory rate limiting. That suits a portfolio demo, not a
     multi-replica deployment.
-11. **Docker** files are written, but the image build has not been verified in this
-    environment.
+11. **Docker** is verified locally and in a CI job, but only with the synthetic demo.
 12. **Graph scope.** Machine accounts and LogOff events are not in the graph, so it cannot show
     activity that only appears under machine accounts. Hub computers are not expanded at hop
     2, so activity hidden among a hub's many accounts is not drawn.
@@ -35,3 +34,8 @@
 14. **Static explorer coverage.** The static site precomputes graphs only for each model's top
     40 test windows and every known red-team test window, and entity details only at hops 0–1.
     The live API serves any of them.
+15. **Incidents are label-defined.** An incident groups red-team-matched events by account and
+    time gap. It reconstructs documented activity; undocumented attacker activity forms no
+    incident, and two campaigns by one account within the gap merge into one.
+16. **Write-ups are templates.** They restate computed facts in fixed sentences. They do not
+    interpret intent or impact, by design.

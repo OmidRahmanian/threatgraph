@@ -33,6 +33,7 @@ log = logging.getLogger("threatgraph.api")
 
 ModelId = Annotated[str, Path(pattern=r"^[a-z0-9_]{1,64}$")]
 WindowId = Annotated[str, Path(pattern=r"^w:[A-Za-z0-9@$._\-]{1,128}:\d{1,12}$")]
+IncidentId = Annotated[str, Path(pattern=r"^inc:[A-Za-z0-9@$._\-]{1,128}:\d{1,12}$")]
 EntityId = Annotated[str, Path(pattern=r"^(principal|computer):[A-Za-z0-9@$._\-]{1,128}$")]
 Split = Annotated[Literal["validation", "test"], Query()]
 MAX_GRAPH_RANGE_SECONDS = 2 * 86_400
@@ -219,6 +220,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/entities/{entity_id}", response_model=S.EntityDetail)
     def entity(entity_id: EntityId) -> S.EntityDetail:
         return ctx().entity(entity_id)
+
+    @app.get("/api/v1/incidents", response_model=S.IncidentIndex)
+    def incidents(
+        scope: Annotated[Literal["evaluated", "all"], Query()] = "evaluated",
+    ) -> S.IncidentIndex:
+        return ctx().incident_index(scope)
+
+    @app.get("/api/v1/incidents/{incident_id}", response_model=S.Incident)
+    def incident(incident_id: IncidentId) -> S.Incident:
+        return ctx().incident(incident_id)
 
     @app.get("/api/v1/benchmarks", response_model=S.Benchmarks)
     def benchmarks() -> S.Benchmarks:

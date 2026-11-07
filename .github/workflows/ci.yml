@@ -48,3 +48,33 @@ jobs:
         continue-on-error: true
         working-directory: apps/web
         run: npm audit --audit-level=high
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e ".[dev]"
+      - name: Build the synthetic demo artifacts and static site
+        run: |
+          .venv/bin/python scripts/run_pipeline.py --dataset demo --seed 42
+          cd apps/web && npm ci && npm run build
+      - name: Start the read-only API and nginx
+        run: docker compose up -d --build --wait
+      - name: Smoke test
+        run: |
+          curl -sf localhost:8000/api/v1/health | grep '"status":"ok"'
+          curl -sf localhost:8000/api/v1/incidents > /dev/null
+          curl -sf "localhost:8000/api/v1/graph/windows?split=test" > /dev/null
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8000/api/v1/summary)" = 405
+          curl -sf localhost:8080/threatgraph/replay/ > /dev/null
+          curl -sf localhost:8080/threatgraph-data/demo/v1/incidents/index.json > /dev/null
+          ! docker compose exec -T api ls /app/data/raw 2>/dev/null
+      - if: always()
+        run: docker compose logs && docker compose down

@@ -55,6 +55,10 @@ def test_export_contains_no_raw_identifiers(built) -> None:
         assert prov["is_synthetic"] is False and prov["mode"] == "lanl"
         assert prov["label_source"] == "lanl_redteam"
     assert (Path(bundle["out_dir"]) / "graph/windows/test/index.json").exists()
+    for rel in bundle["downloads"]:
+        text = (out / rel).read_text()
+        assert RAW_ID.search(text) is None, rel
+        assert "LANL 2015" in text.splitlines()[0] or "LANL 2015" in text[:400], rel
 
 
 def test_aliases_resolve_through_the_api(built) -> None:

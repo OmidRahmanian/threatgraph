@@ -11,8 +11,11 @@ test("overview shows computed stats with a synthetic badge", async ({ page }) =>
   await expect(page.getByTestId("provenance-badge").first()).toHaveText("Synthetic demo");
   await expect(page.getByText("Synthetic demo — no real network data on this page")).toBeVisible();
   await expect(page.getByTestId("stat-events")).toContainText(`${summary.rejected_source_rows} malformed rows rejected`);
-  // Unbuilt views are labeled, not dead links.
-  await expect(page.getByText("Not built yet · Phase 4").first()).toBeVisible();
+  // Every section in the navigation is a working link.
+  const nav = page.getByRole("navigation", { name: "ThreatGraph sections" });
+  for (const name of ["Experiment Lab", "Network explorer", "Incident replay", "Methodology"]) {
+    await expect(nav.getByRole("link", { name })).toBeVisible();
+  }
 });
 
 test("navigation from overview to the lab", async ({ page }) => {
