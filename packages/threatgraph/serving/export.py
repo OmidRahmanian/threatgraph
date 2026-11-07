@@ -4,6 +4,7 @@ The file layout mirrors the API routes under `/api/v1`, so the website can read 
 
     metadata.json                          GET /api/v1/metadata
     summary.json                           GET /api/v1/summary
+    drift.json                             GET /api/v1/drift
     models.json                            GET /api/v1/models
     benchmarks.json                        GET /api/v1/benchmarks
     models/{id}/metrics.json               GET /api/v1/models/{id}/metrics
@@ -64,6 +65,7 @@ def export_bundle(ctx: ServingContext, out_dir: Path) -> dict[str, Any]:
 
     put("metadata.json", ctx.metadata())
     put("summary.json", ctx.summary())
+    put("drift.json", ctx.drift())
     put("models.json", ctx.model_list())
     for model_id in ctx.mcfg.models:
         put(f"models/{model_id}/metrics.json", ctx.model_metrics(model_id))

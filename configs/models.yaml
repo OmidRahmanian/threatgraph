@@ -75,3 +75,10 @@ ablations:
       is not blind: the fixture's red-team campaigns were written to hop from host to host, and
       the pivot feature was designed knowing that. A gain here shows the feature works as
       intended on data built to contain pivots, not that it would help on real data.
+
+# Account cluster bootstrap for confidence intervals on every held-out metric.
+uncertainty: { n_boot: 1000, level: 0.95, seed: 42 }
+
+# Supervised model (M2) only if training labels permit; otherwise the decision and its
+# reason are recorded in metrics.json instead.
+supervised_gate: { min_positive_windows: 30, min_positive_accounts: 5 }

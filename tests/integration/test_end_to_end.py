@@ -101,6 +101,7 @@ def test_api_matches_static_export(built) -> None:
     incidents = json.loads((out / "incidents/index.json").read_text())
     iid = incidents["incidents"][0]["incident_id"]
     routes |= {
+        "drift.json": "/api/v1/drift",
         "incidents/index.json": "/api/v1/incidents",
         f"incidents/{static_slug(iid)}.json": f"/api/v1/incidents/{iid}",
         "graph/windows/test/index.json": "/api/v1/graph/windows?split=test",
@@ -289,3 +290,28 @@ def test_downloads_match_metrics(built) -> None:
         card = (out / f"downloads/model_cards/{m}.md").read_text()
         assert "Synthetic demo" in card and "labels used: no" in card
     assert "## " in (out / "downloads/incident_writeups.md").read_text()
+
+
+def test_phase5_outputs_are_complete_and_consistent(built) -> None:
+    _, mcfg, ctx, *_ = built
+    metrics = ctx.metrics
+    for m in mcfg.models:
+        for split in ("validation", "test"):
+            iv = metrics["models"][m]["splits"][split]["uncertainty"]["average_precision"]
+            ap = metrics["models"][m]["splits"][split]["average_precision"]
+            assert iv["low"] <= ap <= iv["high"]
+        faith = metrics["models"][m]["explanation_faithfulness"]
+        assert (
+            faith["n_alerts"] == metrics["models"][m]["splits"]["test"]["operating_point"]["alerts"]
+        )
+    for split in ("validation", "test"):
+        pairs = {(p["baseline"], p["candidate"]) for p in metrics["uncertainty"][split]["pairs"]}
+        assert ("m1_isolation_forest", "m3_isolation_forest_graph") in pairs
+    gate = metrics["supervised_model"]
+    assert gate["trained"] is False and str(gate["train_positive_windows"]) in gate["reason"]
+    drift = ctx.drift()
+    assert {d.split for d in drift.days} == {"train", "validation", "test"}
+    assert sum(d.n_windows for d in drift.days) == ctx.predictions.height
+    assert "log_prior_windows" in drift.expected_drift
+    models = ctx.model_list()
+    assert models.ablations[0].splits[1].average_precision_delta_interval is not None

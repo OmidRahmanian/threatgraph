@@ -150,6 +150,19 @@ class ModelSpec(BaseModel):
     params: dict[str, Any] = {}
 
 
+class UncertaintyConfig(BaseModel):
+    n_boot: int = Field(default=1000, ge=50, le=20_000)
+    level: float = Field(default=0.95, gt=0.5, lt=1)
+    seed: int = 42
+
+
+class SupervisedGate(BaseModel):
+    """A supervised model is trained only when the training split has enough labels."""
+
+    min_positive_windows: int = Field(default=30, ge=1)
+    min_positive_accounts: int = Field(default=5, ge=1)
+
+
 class AblationSpec(BaseModel):
     """A pair of models that differ only in their inputs, compared on every split."""
 
@@ -170,6 +183,8 @@ class ModelsConfig(BaseModel):
     threshold_policy: ThresholdPolicy
     models: dict[str, ModelSpec]
     ablations: dict[str, AblationSpec] = {}
+    uncertainty: UncertaintyConfig = UncertaintyConfig()
+    supervised_gate: SupervisedGate = SupervisedGate()
 
     @property
     def features(self) -> list[str]:

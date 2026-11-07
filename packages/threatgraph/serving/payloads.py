@@ -21,6 +21,7 @@ from threatgraph.graph.query import EntityType, subgraph
 from threatgraph.ml.models import AnomalyModel
 from threatgraph.pipeline import (
     EVAL_SPLITS,
+    drift_path,
     features_path,
     graph_dir,
     labels_path,
@@ -54,7 +55,7 @@ MODEL_DESCRIPTIONS = {
         "without labels. Its score ranks unusualness; it is not a probability of compromise."
     ),
 }
-IMPLEMENTED_VIEWS = ["overview", "lab", "explorer", "replay", "methodology"]
+IMPLEMENTED_VIEWS = ["overview", "lab", "explorer", "replay", "methodology", "drift"]
 MAX_EVIDENCE = 40
 # Per-split cap on exported/served score rows (real LANL splits can hold hundreds of thousands).
 SCORE_TABLE_MAX_ROWS = 10_000
@@ -301,6 +302,7 @@ class ServingContext:
                 S.HeadlineMetrics(
                     split=split,
                     average_precision=s["average_precision"],
+                    intervals=s.get("uncertainty"),
                     random_ranking_average_precision=s["random_ranking_average_precision"],
                     precision_at_10=next(
                         p["precision"] for p in s["precision_at_k"] if p["k"] == 10
@@ -321,6 +323,16 @@ class ServingContext:
             splits = []
             for b, c in zip(base_h, cand_h, strict=True):
                 ap_b, ap_c = b.average_precision, c.average_precision
+                pair = next(
+                    (
+                        x
+                        for x in self.metrics.get("uncertainty", {})
+                        .get(b.split, {})
+                        .get("pairs", [])
+                        if x["baseline"] == ab.baseline and x["candidate"] == ab.candidate
+                    ),
+                    None,
+                )
                 splits.append(
                     S.AblationSplit(
                         split=b.split,
@@ -332,6 +344,10 @@ class ServingContext:
                         average_precision_delta=None
                         if ap_b is None or ap_c is None
                         else ap_c - ap_b,
+                        average_precision_delta_interval=pair["average_precision_delta"]
+                        if pair
+                        else None,
+                        share_candidate_better=pair["share_candidate_better"] if pair else None,
                     )
                 )
             out.append(
@@ -374,7 +390,18 @@ class ServingContext:
                     headline=headline,
                 )
             )
-        return S.ModelList(provenance=self.provenance, models=out, ablations=self.ablations())
+        return S.ModelList(
+            provenance=self.provenance,
+            models=out,
+            ablations=self.ablations(),
+            bootstrap=self.metrics["uncertainty"],
+            supervised_model=self.metrics["supervised_model"],
+        )
+
+    def drift(self) -> S.Drift:
+        return S.Drift(
+            **json.loads(require(drift_path(self.cfg), "Run scripts/evaluate.py.").read_text())
+        )
 
     def model_metrics(self, model_id: str) -> S.ModelMetrics:
         self._model(model_id)
@@ -391,6 +418,7 @@ class ServingContext:
             evaluation_assumptions=self.metrics["evaluation_assumptions"],
             split_boundaries_seconds=self.metrics["split_boundaries_seconds"],
             splits=splits,
+            explanation_faithfulness=m.get("explanation_faithfulness"),
         )
 
     def score_table(self, model_id: str, split: str) -> S.ScoreTable:

@@ -231,6 +231,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def incident(incident_id: IncidentId) -> S.Incident:
         return ctx().incident(incident_id)
 
+    @app.get("/api/v1/drift", response_model=S.Drift)
+    def drift() -> S.Drift:
+        return ctx().drift()
+
     @app.get("/api/v1/benchmarks", response_model=S.Benchmarks)
     def benchmarks() -> S.Benchmarks:
         return ctx().benchmarks()

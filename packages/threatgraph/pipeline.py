@@ -3,6 +3,7 @@ run independently (scripts/*.py) or together (scripts/run_pipeline.py)."""
 
 from __future__ import annotations
 
+import itertools
 import json
 import time
 from contextlib import contextmanager
@@ -23,8 +24,11 @@ from threatgraph.data.features import FEATURE_DESCRIPTIONS, build_window_feature
 from threatgraph.data.ingest import auth_glob, ingest_auth, ingest_redteam, write_json
 from threatgraph.data.redteam import match_redteam
 from threatgraph.graph.build import build_edge_table, build_entity_tables
+from threatgraph.ml.drift import drift_report
+from threatgraph.ml.faithfulness import deletion_test
 from threatgraph.ml.metrics import EVALUATION_ASSUMPTIONS, detection_latency, evaluate_scores
 from threatgraph.ml.models import AnomalyModel, build_model
+from threatgraph.ml.uncertainty import account_bootstrap
 from threatgraph.provenance import PIPELINE_VERSION, label_source, provenance_block
 from threatgraph.versions import library_versions, peak_rss_mb
 
@@ -58,6 +62,10 @@ def predictions_path(cfg: DatasetConfig) -> Path:
 
 def metrics_path(cfg: DatasetConfig) -> Path:
     return cfg.artifacts_path / "metrics.json"
+
+
+def drift_path(cfg: DatasetConfig) -> Path:
+    return cfg.artifacts_path / "drift.json"
 
 
 def model_dir(cfg: DatasetConfig, model_id: str) -> Path:
@@ -274,6 +282,76 @@ def run_evaluate(cfg: DatasetConfig, mcfg: ModelsConfig) -> dict[str, Any]:
                 "threshold": model.threshold,
                 "splits": per_split,
             }
+        # Phase 5: uncertainty, explanation faithfulness, supervised gate, drift.
+        pairs = [(ab.baseline, ab.candidate) for ab in mcfg.ablations.values()]
+        ids = list(models)
+        pairs += [(a, b) for a, b in itertools.pairwise(ids) if (a, b) not in pairs]
+        u = mcfg.uncertainty
+        for split in EVAL_SPLITS:
+            part = preds.filter(pl.col("split") == split)
+            boot = account_bootstrap(
+                part["src_principal"].to_numpy(),
+                part["label"].to_numpy().astype(int),
+                {mid: part[f"score__{mid}"].to_numpy() for mid in models},
+                {mid: float(models[mid].threshold) for mid in models},  # type: ignore[arg-type]
+                pairs,
+                n_boot=u.n_boot,
+                seed=u.seed,
+                level=u.level,
+            )
+            for mid in models:
+                result["models"][mid]["splits"][split]["uncertainty"] = boot["models"][mid]
+            result.setdefault("uncertainty", {})[split] = {
+                k: v for k, v in boot.items() if k != "models"
+            }
+        feats = pl.read_parquet(features_path(cfg))
+        test = feats.join(
+            preds.select("window_id", *[f"score__{mid}" for mid in models]), on="window_id"
+        )
+        test = test.filter(pl.col("split") == "test")
+        for mid, model in models.items():
+            alerted = test.filter(pl.col(f"score__{mid}") >= model.threshold)
+            result["models"][mid]["explanation_faithfulness"] = deletion_test(
+                model, _matrix(alerted, model.features), seed=cfg.seed
+            )
+        train = preds.filter(pl.col("split") == "train")
+        gate = mcfg.supervised_gate
+        n_pos = int(train["label"].sum())
+        n_acc = train.filter(pl.col("label") == 1)["src_principal"].n_unique()
+        ok = n_pos >= gate.min_positive_windows and n_acc >= gate.min_positive_accounts
+        result["supervised_model"] = {
+            "trained": False,
+            "labels_permit": ok,
+            "train_positive_windows": n_pos,
+            "train_positive_accounts": n_acc,
+            "required": gate.model_dump(),
+            "reason": (
+                f"The training split has {n_pos} known red-team windows from {n_acc} accounts; "
+                f"a supervised model needs at least {gate.min_positive_windows} from "
+                f"{gate.min_positive_accounts}."
+                if not ok
+                else "Labels would permit a supervised model; none is configured yet."
+            ),
+        }
+        scored = feats.join(
+            preds.select("window_id", *[f"score__{mid}" for mid in models]), on="window_id"
+        ).filter(pl.col("split").is_in(["train", *EVAL_SPLITS]))
+        write_json(
+            drift_path(cfg),
+            {
+                "provenance": result["provenance"],
+                **drift_report(
+                    scored,
+                    mcfg.features,
+                    {mid: float(models[mid].threshold) for mid in models},  # type: ignore[arg-type]
+                    mcfg.threshold_policy.alert_rate,
+                    expected={
+                        "log_prior_windows": "counts an account's past windows, so it grows "
+                        "over time by design; models that use it see later periods shift."
+                    },
+                ),
+            },
+        )
         write_json(metrics_path(cfg), result)
         write_benchmark_report(cfg, result, mcfg)
     return result
@@ -290,13 +368,18 @@ def write_benchmark_report(
         f"Config hash `{prov['config_hash']}` · pipeline {prov['pipeline_version']}. "
         "Generated by `scripts/evaluate.py`; do not edit by hand.",
         "",
-        "| Model | Split | Windows | Known-positive windows | AP | Random-ranking AP | P@10 | "
-        "Alerts @ threshold | Known-label recall | Precision (lower bound) |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Model | Split | Windows | Known-positive windows | AP | AP 95% CI | Random-ranking AP | "
+        "P@10 | Alerts @ threshold | Known-label recall | Precision (lower bound) |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
 
     def fmt(v: Any, digits: int = 3) -> str:
         return "n/e" if v is None else (f"{v:.{digits}f}" if isinstance(v, float) else str(v))
+
+    def ci(iv: dict[str, Any] | None) -> str:
+        if not iv or iv.get("low") is None:
+            return "n/e"
+        return f"[{iv['low']:.3f}, {iv['high']:.3f}]"
 
     for m in metrics["models"].values():
         for split, s in m["splits"].items():
@@ -304,11 +387,19 @@ def write_benchmark_report(
             p10 = next(p for p in s["precision_at_k"] if p["k"] == 10)
             lines.append(
                 f"| {m['display_name']} | {split} | {s['n_windows']} | {s['n_positive_windows']} | "
-                f"{fmt(s['average_precision'])} | {fmt(s['random_ranking_average_precision'])} | "
+                f"{fmt(s['average_precision'])} | "
+                f"{ci((s.get('uncertainty') or {}).get('average_precision'))} | "
+                f"{fmt(s['random_ranking_average_precision'])} | "
                 f"{fmt(p10['precision'])} | {op['alerts']} | {fmt(op['known_label_recall'])} | "
                 f"{fmt(op['precision_lower_bound'])} |"
             )
     lines += ["", "n/e = not estimable (no known positives in the split).", ""]
+    for split, u in metrics.get("uncertainty", {}).items():
+        lines.append(
+            f"CIs ({split}): {u['method']}, {u['n_boot']} resamples of {u['n_accounts']} accounts "
+            f"({u['n_positive_accounts']} with known red-team activity), seed {u['seed']}."
+        )
+    lines.append("")
     for ab in (mcfg.ablations if mcfg else {}).values():
         base, cand = metrics["models"][ab.baseline], metrics["models"][ab.candidate]
         added = sorted(set(mcfg.features_for(ab.candidate)) - set(mcfg.features_for(ab.baseline)))  # type: ignore[union-attr]
@@ -317,19 +408,57 @@ def write_benchmark_report(
             "",
             f"Features added in the candidate: {', '.join(f'`{f}`' for f in added) or 'none'}.",
             "",
-            "| Split | AP baseline | AP candidate | Δ AP | Recall baseline | Recall candidate |",
-            "|---|---:|---:|---:|---:|---:|",
+            "| Split | AP baseline | AP candidate | Δ AP | Δ AP 95% CI | Candidate better in | "
+            "Recall baseline | Recall candidate |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|",
         ]
         for split in EVAL_SPLITS:
             b, c = base["splits"][split], cand["splits"][split]
             ap_b, ap_c = b["average_precision"], c["average_precision"]
             delta = None if ap_b is None or ap_c is None else ap_c - ap_b
+            pair: dict[str, Any] = next(
+                (
+                    x
+                    for x in metrics.get("uncertainty", {}).get(split, {}).get("pairs", [])
+                    if x["baseline"] == ab.baseline and x["candidate"] == ab.candidate
+                ),
+                {},
+            )
+            better = pair.get("share_candidate_better")
             lines.append(
                 f"| {split} | {fmt(ap_b)} | {fmt(ap_c)} | {fmt(delta)} | "
+                f"{ci(pair.get('average_precision_delta'))} | "
+                f"{'n/e' if better is None else f'{better:.0%} of resamples'} | "
                 f"{fmt(b['operating_point']['known_label_recall'])} | "
                 f"{fmt(c['operating_point']['known_label_recall'])} |"
             )
         lines += ["", ab.note.strip(), ""]
+    faith = [
+        (m, v["explanation_faithfulness"])
+        for m, v in metrics["models"].items()
+        if "explanation_faithfulness" in v
+    ]
+    if faith:
+        lines += [
+            "## Explanation faithfulness (deletion test, test alerts)",
+            "",
+            "Reset the explanation's top-k features to training medians and re-score; compare with "
+            "resetting k random features.",
+            "",
+            "| Model | Alerts | k | Score drop (top-k) | Score drop (random k) | Below threshold (top-k) | "
+            "Below threshold (random k) |",
+            "|---|---:|---:|---:|---:|---:|---:|",
+        ]
+        for m, f in faith:
+            for r in f["results"]:
+                lines.append(
+                    f"| {metrics['models'][m]['display_name']} | {f['n_alerts']} | {r['k']} | "
+                    f"{r['mean_score_drop_top']:.4f} | {r['mean_score_drop_random']:.4f} | "
+                    f"{r['below_threshold_share_top']:.0%} | {r['below_threshold_share_random']:.0%} |"
+                )
+        lines.append("")
+    if "supervised_model" in metrics:
+        lines += ["## Supervised model", "", metrics["supervised_model"]["reason"], ""]
     lines += [f"- {a}" for a in metrics["evaluation_assumptions"]]
     path = cfg.artifacts_path / "reports" / "evaluation.md"
     path.parent.mkdir(parents=True, exist_ok=True)

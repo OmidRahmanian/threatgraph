@@ -33,6 +33,7 @@ reported as **not estimable** (`n/e`), never as 0.
 | Alerts, alerts/day, alerts per 1,000 windows | analyst workload, valid even without negative labels |
 | Detection latency | per account: first labeled event → end of the first alerted labeled window |
 | ROC AUC | stored for completeness; not emphasized under extreme imbalance |
+| 95% intervals | account cluster bootstrap (percentile); the share of resamples able to estimate each metric is stored |
 
 **Labeling assumption.** Precision, AP and the confusion matrix treat unlabeled windows as
 negatives. Unlabeled windows may hold undocumented attacks (the synthetic fixture deliberately
@@ -49,10 +50,13 @@ checks that the UI displays it.
 
 ## Known gaps
 
-- **Uncertainty.** No confidence intervals yet. With fewer than 10 positive windows per
-  split, model differences are noisy. Planned: block bootstrap over days or accounts, not
-  independent windows.
+- **Uncertainty.** Intervals come from an account cluster bootstrap (`ml/uncertainty.py`,
+  settings in `configs/models.yaml`). With two or three positive accounts per split on the demo,
+  they are very wide. Model differences are paired on the same resamples.
 - The graph-feature ablation (M1 vs M3) exists, but on the demo it is not blind; see `docs/graph.md`.
-- No drift monitor yet (Phase 5).
+- The drift monitor (`ml/drift.py`, `artifacts/<ds>/drift.json`, Lab panel) reports PSI per
+  feature and score per day against the train split, plus the daily alert rate.
+- Explanation faithfulness is measured by a deletion test (`ml/faithfulness.py`), reported
+  in `evaluation.md` and the Lab.
 - Synthetic results show the pipeline works. They do not measure real-world detection
   performance.

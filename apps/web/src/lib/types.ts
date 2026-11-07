@@ -55,9 +55,22 @@ export interface Summary {
   model_versions: Record<string, string>;
 }
 
+export interface Interval {
+  low: number | null;
+  high: number | null;
+  estimable_share: number;
+}
+
+export interface MetricIntervals {
+  average_precision: Interval;
+  known_label_recall: Interval;
+  precision_lower_bound: Interval;
+}
+
 export interface HeadlineMetrics {
   split: EvalSplit;
   average_precision: number | null;
+  intervals: MetricIntervals | null;
   random_ranking_average_precision: number | null;
   precision_at_10: number | null;
   alerts: number;
@@ -88,6 +101,8 @@ export interface AblationSplit {
   baseline: HeadlineMetrics;
   candidate: HeadlineMetrics;
   average_precision_delta: number | null;
+  average_precision_delta_interval: Interval | null;
+  share_candidate_better: number | null;
 }
 
 export interface Ablation {
@@ -101,10 +116,30 @@ export interface Ablation {
   splits: AblationSplit[];
 }
 
+export interface BootstrapInfo {
+  method: string;
+  n_boot: number;
+  seed: number;
+  level: number;
+  n_accounts: number;
+  n_positive_accounts: number;
+}
+
+export interface SupervisedDecision {
+  trained: boolean;
+  labels_permit: boolean;
+  train_positive_windows: number;
+  train_positive_accounts: number;
+  required: Record<string, number>;
+  reason: string;
+}
+
 export interface ModelList {
   provenance: Provenance;
   models: ModelInfo[];
   ablations: Ablation[];
+  bootstrap: Record<string, BootstrapInfo>;
+  supervised_model: SupervisedDecision;
 }
 
 export interface ThresholdPoint {
@@ -145,6 +180,23 @@ export interface SplitMetrics {
   pr_curve: { recall: number; precision: number; threshold: number }[];
   score_histogram: { bin_edges: number[]; known_positive: number[]; unlabeled: number[] };
   detection_latency: Latency[];
+  uncertainty: MetricIntervals | null;
+}
+
+export interface Faithfulness {
+  method: string;
+  split: string;
+  n_alerts: number;
+  n_random_draws: number;
+  seed: number;
+  results: {
+    k: number;
+    mean_score_drop_top: number;
+    mean_score_drop_random: number;
+    below_threshold_share_top: number;
+    below_threshold_share_random: number;
+    top_beats_random_share: number;
+  }[];
 }
 
 export interface ModelMetrics {
@@ -155,6 +207,7 @@ export interface ModelMetrics {
   evaluation_assumptions: string[];
   split_boundaries_seconds: Record<string, [number, number]>;
   splits: Record<EvalSplit, SplitMetrics>;
+  explanation_faithfulness: Faithfulness | null;
 }
 
 export type ScoreRow = [windowId: string, score: number, label: 0 | 1];
@@ -437,4 +490,28 @@ export interface Incident {
   windows: IncidentWindow[];
   writeup: string[];
   caveats: string[];
+}
+
+export interface DriftDay {
+  day: number;
+  split: string;
+  n_windows: number;
+  n_known_positive_windows: number;
+  feature_psi: Record<string, number | null>;
+  score_psi: Record<string, number | null>;
+  alert_rate: Record<string, number>;
+}
+
+export interface Drift {
+  provenance: Provenance;
+  reference: string;
+  bins: number;
+  thresholds: { stable: number; major: number };
+  alert_budget: number;
+  features: string[];
+  constant_in_reference: string[];
+  expected_drift: Record<string, string>;
+  models: string[];
+  days: DriftDay[];
+  semantics: string;
 }

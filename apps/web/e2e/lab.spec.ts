@@ -87,3 +87,18 @@ test("the lab shows the graph-feature ablation from stored metrics", async ({ pa
   const test = ablation.splits.find((s: { split: string }) => s.split === "test");
   await expect(table.locator("tbody tr").nth(1)).toContainText(test.candidate.average_precision.toFixed(3));
 });
+
+test("intervals, drift and explanation faithfulness come from the bundle", async ({ page }) => {
+  const models = read("models.json");
+  const m = models.models[models.models.length - 1];
+  const test = m.headline.find((h: { split: string }) => h.split === "test");
+  const drift = read("drift.json");
+  const faith = read(`models/${m.model_id}/metrics.json`).explanation_faithfulness;
+  await page.goto("/threatgraph/lab/");
+  const iv = test.intervals.average_precision;
+  await expect(page.getByTestId("comparison-table")).toContainText(`[${iv.low.toFixed(2)}, ${iv.high.toFixed(2)}]`);
+  await expect(page.getByTestId("drift-table").locator("thead th")).toHaveCount(drift.days.length + 1);
+  await expect(page.getByTestId("drift-table")).toContainText("drifts by design");
+  await expect(page.getByTestId("faithfulness-table").locator("tbody tr")).toHaveCount(faith.results.length);
+  await expect(page.getByTestId("supervised-note")).toContainText(String(models.supervised_model.train_positive_windows));
+});

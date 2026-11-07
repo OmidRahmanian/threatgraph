@@ -34,6 +34,7 @@ export function Methodology() {
       <FeatureSection meta={meta} />
       <ModelSection models={models} />
       <EvaluationSection meta={meta} />
+      <ResearchSection models={models} />
       <LeakageSection />
       <GraphSection />
       <LimitationsSection />
@@ -49,6 +50,7 @@ const SECTIONS: [string, string][] = [
   ["features", "Features"],
   ["models", "Models"],
   ["evaluation", "Evaluation"],
+  ["research", "Uncertainty, drift, explanations"],
   ["leakage", "Leakage controls"],
   ["graph", "Graph"],
   ["limitations", "Limitations"],
@@ -199,8 +201,44 @@ function EvaluationSection({ meta }: { meta: Metadata }) {
         </ul>
         <p>
           The Lab recomputes threshold metrics in the browser from the stored held-out scores; tests check that this reproduces
-          the stored numbers. No confidence intervals are computed yet, and with a handful of positive windows per split,
-          differences between models are uncertain.
+          the stored numbers.
+        </p>
+      </Prose>
+    </Panel>
+  );
+}
+
+function ResearchSection({ models }: { models: ModelList }) {
+  const boot = models.bootstrap.test;
+  return (
+    <Panel id="research">
+      <SectionTitle title="Uncertainty, drift and explanation quality" />
+      <Prose>
+        <p>
+          <strong className="text-ink">Confidence intervals.</strong> Windows of one account are correlated and red-team labels come in
+          per-account runs, so the bootstrap resamples whole accounts ({boot ? `${boot.n_boot} resamples, seed ${boot.seed}` : "—"}).
+          Model differences are paired: every model is scored on the same resample. Resamples with no positive account cannot
+          estimate AP and are dropped for that metric; the share kept is stored. With {boot?.n_positive_accounts ?? "—"} positive
+          accounts in the test split, intervals are wide, and that is the honest result.
+        </p>
+        <p>
+          <strong className="text-ink">Drift monitor.</strong> For each scored day, the population stability index of every feature and
+          model score against the training split, and the alert rate against the budget. Training days are included to show how
+          noisy the measure itself is. Features that grow by design (account history) are labeled as such.
+        </p>
+        <p>
+          <strong className="text-ink">Explanation faithfulness.</strong> A deletion test: reset the k features an explanation ranks
+          highest to their training medians and re-score, compared with resetting k random features. M0&apos;s explanation is exact and
+          acts as a reference; for Isolation Forest it measures how useful the proxy ranking is.
+        </p>
+        <p>
+          <strong className="text-ink">Supervised model.</strong> {models.supervised_model.reason} The threshold for training one is
+          fixed in configuration before results are seen.
+        </p>
+        <p>
+          <strong className="text-ink">Not built:</strong> flow, DNS and process logs (LANL publishes them, but they need the same
+          user download, and the synthetic fixture has none) and a graph neural network benchmark (a heavy dependency for a
+          comparison that a handful of labeled accounts could not support).
         </p>
       </Prose>
     </Panel>

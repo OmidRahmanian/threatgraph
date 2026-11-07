@@ -44,3 +44,8 @@ export function bytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 }
+
+/** A confidence interval, or "n/e" when no resample could estimate it. */
+export function interval(iv: { low: number | null; high: number | null } | null | undefined, digits = 2): string {
+  return !iv || iv.low === null || iv.high === null ? "n/e" : `[${iv.low.toFixed(digits)}, ${iv.high.toFixed(digits)}]`;
+}

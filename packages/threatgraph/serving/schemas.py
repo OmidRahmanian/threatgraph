@@ -72,9 +72,22 @@ class Summary(BaseModel):
     model_versions: dict[str, str]
 
 
+class Interval(BaseModel):
+    low: float | None
+    high: float | None
+    estimable_share: float
+
+
+class MetricIntervals(BaseModel):
+    average_precision: Interval
+    known_label_recall: Interval
+    precision_lower_bound: Interval
+
+
 class HeadlineMetrics(BaseModel):
     split: str
     average_precision: float | None
+    intervals: MetricIntervals | None = None
     random_ranking_average_precision: float | None
     precision_at_10: float | None
     alerts: int
@@ -105,6 +118,8 @@ class AblationSplit(BaseModel):
     baseline: HeadlineMetrics
     candidate: HeadlineMetrics
     average_precision_delta: float | None
+    average_precision_delta_interval: Interval | None = None
+    share_candidate_better: float | None = None
 
 
 class Ablation(BaseModel):
@@ -118,10 +133,30 @@ class Ablation(BaseModel):
     splits: list[AblationSplit]
 
 
+class BootstrapInfo(BaseModel):
+    method: str
+    n_boot: int
+    seed: int
+    level: float
+    n_accounts: int
+    n_positive_accounts: int
+
+
+class SupervisedDecision(BaseModel):
+    trained: bool
+    labels_permit: bool
+    train_positive_windows: int
+    train_positive_accounts: int
+    required: dict[str, int]
+    reason: str
+
+
 class ModelList(BaseModel):
     provenance: Provenance
     models: list[ModelInfo]
     ablations: list[Ablation]
+    bootstrap: dict[str, BootstrapInfo]
+    supervised_model: SupervisedDecision
 
 
 class ThresholdPoint(BaseModel):
@@ -181,6 +216,25 @@ class SplitMetrics(BaseModel):
     pr_curve: list[PRPoint]
     score_histogram: Histogram
     detection_latency: list[Latency]
+    uncertainty: MetricIntervals | None = None
+
+
+class FaithfulnessResult(BaseModel):
+    k: int
+    mean_score_drop_top: float
+    mean_score_drop_random: float
+    below_threshold_share_top: float
+    below_threshold_share_random: float
+    top_beats_random_share: float
+
+
+class Faithfulness(BaseModel):
+    method: str
+    split: str
+    n_alerts: int
+    n_random_draws: int
+    seed: int
+    results: list[FaithfulnessResult]
 
 
 class ModelMetrics(BaseModel):
@@ -191,6 +245,7 @@ class ModelMetrics(BaseModel):
     evaluation_assumptions: list[str]
     split_boundaries_seconds: dict[str, list[int]]
     splits: dict[str, SplitMetrics]
+    explanation_faithfulness: Faithfulness | None = None
 
 
 class ScoreTable(BaseModel):
@@ -539,6 +594,30 @@ class Incident(BaseModel):
     windows: list[IncidentWindow]
     writeup: list[str]
     caveats: list[str]
+
+
+class DriftDay(BaseModel):
+    day: int
+    split: str
+    n_windows: int
+    n_known_positive_windows: int
+    feature_psi: dict[str, float | None]
+    score_psi: dict[str, float | None]
+    alert_rate: dict[str, float]
+
+
+class Drift(BaseModel):
+    provenance: Provenance
+    reference: str
+    bins: int
+    thresholds: dict[str, float]
+    alert_budget: float
+    features: list[str]
+    constant_in_reference: list[str]
+    expected_drift: dict[str, str]
+    models: list[str]
+    days: list[DriftDay]
+    semantics: str
 
 
 class Health(BaseModel):

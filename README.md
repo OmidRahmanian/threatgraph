@@ -12,11 +12,11 @@ alert threshold, see metrics recompute from the stored held-out scores, inspect 
 behind any alert, explore which computers an alerted account moved between, and replay
 documented red-team incidents against each model's alerts.
 
-> **Status: Phases 1, 3 and 4 complete; Phase 2 ready but not run on real data.** The demo runs
-> on a **deterministic synthetic fixture** and is labeled *Synthetic demo* everywhere. Real
-> LANL mode is tested end to end on LANL-format data but has **not** been run on the real files
-> (they need LANL's data-use form), so no real-data performance is claimed. Optional Phase 5
-> extensions are not started. See [What's implemented](#whats-implemented).
+> **Status: Phases 1, 3, 4 and 5 complete (Phase 5 where the data allows); Phase 2 ready but
+> not run on real data.** The demo runs on a **deterministic synthetic fixture** and is labeled
+> *Synthetic demo* everywhere. Real LANL mode is tested end to end on LANL-format data but has
+> **not** been run on the real files (they need LANL's data-use form), so no real-data
+> performance is claimed. See [What's implemented](#whats-implemented).
 
 ## Quick start
 
@@ -97,10 +97,12 @@ Details, the real-data-mode guarantees and a scale rehearsal: [docs/real_data.md
 | Incident API, replay page (alerts revealed at window end), generated write-ups | ✅ |
 | Methodology page, model cards (Markdown), comparison CSV, API latency in the site | ✅ |
 | Docker stack (read-only API + nginx) verified locally; CI Docker smoke-test job | ✅ |
+| Account cluster-bootstrap CIs, paired model differences, drift monitor, explanation deletion test | ✅ |
+| Supervised model (M2) | ⛔ gated: demo labels too few (decision recorded in metrics.json) |
+| Flows/DNS/process logs, GNN benchmark | ⏳ not built (need LANL download / see docs/modeling.md) |
 | Bounded-memory chunked features/graph, split suggestion, capped score tables, real-data-mode test, scale rehearsal | ✅ |
 | CI workflow (Python, web + e2e, Docker smoke test) | ✅ written · not yet run on GitHub |
 | Run on real LANL data | ⏳ pipeline ready, not yet run (needs your download) |
-| Flows/DNS/process, drift monitor, bootstrap CIs, supervised model | ⏳ Phase 5 (optional) |
 
 ## Architecture
 

@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import type {
   Benchmarks,
+  Drift,
   EntityDetail,
   EvalSplit,
   Explanation,
@@ -96,6 +97,7 @@ export const api = {
   /** Resolves to null when the static export did not include this entity (hop-2 entities). */
   entity: (entityId: string) =>
     getJsonOrNull<EntityDetail>(route(`/entities/${encodeURIComponent(entityId)}`, `entities/${staticSlug(entityId)}.json`)),
+  drift: () => getJson<Drift>(route("/drift", "drift.json")),
   incidents: () => getJson<IncidentIndex>(route("/incidents", "incidents/index.json")),
   incident: (id: string) =>
     getJsonOrNull<Incident>(route(`/incidents/${encodeURIComponent(id)}`, `incidents/${staticSlug(id)}.json`)),

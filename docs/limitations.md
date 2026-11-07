@@ -13,7 +13,8 @@
    only documented activity. The LANL red-team file covers authentication events only.
 4. **Red-team key choice.** Matching uses the *source* principal by default. This is a
    documented, configurable assumption.
-5. **Small positive counts** make AP and recall noisy. No confidence intervals yet.
+5. **Small positive counts** make AP and recall noisy. The bootstrap intervals show how
+   noisy: on the demo, test AP intervals span most of [0, 1].
 6. **Window granularity.** Alerts arrive at window end (up to 1 hour of latency by
    construction). Attacks spread thinly across windows ("low and slow") are hard to detect at
    this unit.
@@ -39,3 +40,11 @@
     incident, and two campaigns by one account within the gap merge into one.
 16. **Write-ups are templates.** They restate computed facts in fixed sentences. They do not
     interpret intent or impact, by design.
+17. **History feature drifts by design.** The drift monitor shows the Isolation Forest score
+    distributions shifting in later periods while every behavioral feature stays stable. The
+    cause is `log_prior_windows`, which grows as history accumulates. Alert rates stay close to
+    the budget on the demo, but on longer real data this could move alert volume. A fix would
+    cap or rank-normalize the history feature; it is not applied, so as not to change models
+    after seeing results.
+18. **Faithfulness test baseline.** The deletion test resets features to training medians; a
+    different baseline (for example a per-account median) could rank explanations differently.

@@ -2,9 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { api, useLoad } from "@/lib/data";
-import { duration, int, ratio, relTime, score as fmtScore } from "@/lib/format";
+import { duration, int, interval, ratio, relTime, score as fmtScore } from "@/lib/format";
 import { rankRows, thresholdLadder, thresholdMetrics } from "@/lib/threshold";
-import type { Ablation, EvalSplit, Metadata, ModelInfo, ModelMetrics, ScoreRow, ScoreTable } from "@/lib/types";
+import type { Ablation, EvalSplit, Metadata, ModelInfo, ModelList, ModelMetrics, ScoreRow, ScoreTable } from "@/lib/types";
 import {
   AlertBadge,
   Callout,
@@ -19,6 +19,7 @@ import {
 } from "../ui";
 import { PRCurve, ScoreDistribution } from "./Charts";
 import { ExplanationView } from "./ExplanationView";
+import { DriftPanel, FaithfulnessPanel, SupervisedNote } from "./Phase5";
 import { ThresholdPanel } from "./ThresholdPanel";
 
 const SPLITS: { value: EvalSplit; label: string }[] = [
@@ -60,12 +61,15 @@ export function Lab() {
           title="Model comparison"
           subtitle="Stored metrics at each model's validation-calibrated threshold (top 1% of validation windows alerted)."
         />
-        <ComparisonTable models={models.models} />
+        <ComparisonTable models={models} />
       </Panel>
 
       {models.ablations.map((a) => (
         <AblationPanel key={a.ablation_id} ablation={a} models={models.models} />
       ))}
+
+      <DriftPanel models={models.models} />
+      <SupervisedNote decision={models.supervised_model} />
 
       <div className="flex flex-wrap items-center gap-3">
         <Segmented
@@ -81,7 +85,18 @@ export function Lab() {
   );
 }
 
-function ComparisonTable({ models }: { models: ModelInfo[] }) {
+function WithInterval({ value, iv, digits = 3 }: { value: number | null; iv?: { low: number | null; high: number | null } | null; digits?: number }) {
+  return (
+    <>
+      <div>{ratio(value, digits)}</div>
+      {iv !== undefined ? <div className="text-[11px] text-ink-3">{interval(iv)}</div> : null}
+    </>
+  );
+}
+
+function ComparisonTable({ models: list }: { models: ModelList }) {
+  const models = list.models;
+  const boot = list.bootstrap.test;
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[720px] text-left text-sm" data-testid="comparison-table">
@@ -103,20 +118,28 @@ function ComparisonTable({ models }: { models: ModelInfo[] }) {
               <tr key={`${m.model_id}-${h.split}`} className={i === 0 ? "border-t border-line" : ""}>
                 <td className="py-1.5 pr-3 text-ink">{i === 0 ? m.display_name : ""}</td>
                 <td className="py-1.5 pr-3 text-ink-2">{h.split}</td>
-                <td className="py-1.5 pr-3 text-right">{ratio(h.average_precision)}</td>
+                <td className="py-1.5 pr-3 text-right">
+                  <WithInterval value={h.average_precision} iv={h.intervals?.average_precision ?? null} />
+                </td>
                 <td className="py-1.5 pr-3 text-right text-ink-3">{ratio(h.random_ranking_average_precision)}</td>
                 <td className="py-1.5 pr-3 text-right">{ratio(h.precision_at_10, 2)}</td>
                 <td className="py-1.5 pr-3 text-right">{int(h.alerts)}</td>
-                <td className="py-1.5 pr-3 text-right">{ratio(h.known_label_recall)}</td>
-                <td className="py-1.5 text-right">{ratio(h.precision_lower_bound)}</td>
+                <td className="py-1.5 pr-3 text-right">
+                  <WithInterval value={h.known_label_recall} iv={h.intervals?.known_label_recall ?? null} />
+                </td>
+                <td className="py-1.5 text-right">
+                  <WithInterval value={h.precision_lower_bound} iv={h.intervals?.precision_lower_bound ?? null} />
+                </td>
               </tr>
             )),
           )}
         </tbody>
       </table>
       <p className="mt-2 text-xs text-ink-3">
-        n/e = not estimable (no known positives). With a handful of known red-team windows per split, differences between models
-        carry large uncertainty; no confidence intervals are computed yet.
+        n/e = not estimable (no known positives). Brackets are {Math.round((boot?.level ?? 0.95) * 100)}% intervals from an account
+        cluster bootstrap ({boot ? int(boot.n_boot) : "—"} resamples of whole accounts). The test split has only{" "}
+        {boot?.n_positive_accounts ?? "—"} accounts with known red-team activity, so the intervals are wide: treat differences
+        between models as indicative.
       </p>
     </div>
   );
@@ -136,7 +159,7 @@ function AblationPanel({ ablation: a, models }: { ablation: Ablation; models: Mo
         }
       />
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[600px] text-left text-sm tabular-nums" data-testid="ablation-table">
+        <table className="w-full min-w-[820px] text-left text-sm tabular-nums" data-testid="ablation-table">
           <thead className="text-xs text-ink-3">
             <tr>
               <th className="py-1.5 pr-3 font-normal">Split</th>
@@ -144,6 +167,8 @@ function AblationPanel({ ablation: a, models }: { ablation: Ablation; models: Mo
               <th className="py-1.5 pr-3 text-right font-normal">AP without graph features</th>
               <th className="py-1.5 pr-3 text-right font-normal">AP with graph features</th>
               <th className="py-1.5 pr-3 text-right font-normal">Change in AP</th>
+              <th className="py-1.5 pr-3 text-right font-normal">95% interval of change</th>
+              <th className="py-1.5 pr-3 text-right font-normal">With &gt; without in</th>
               <th className="py-1.5 pr-3 text-right font-normal">Recall without</th>
               <th className="py-1.5 text-right font-normal">Recall with</th>
             </tr>
@@ -157,6 +182,10 @@ function AblationPanel({ ablation: a, models }: { ablation: Ablation; models: Mo
                 <td className="py-1.5 pr-3 text-right">{ratio(s.candidate.average_precision)}</td>
                 <td className="py-1.5 pr-3 text-right">
                   {s.average_precision_delta === null ? "n/e" : `${s.average_precision_delta >= 0 ? "+" : "−"}${Math.abs(s.average_precision_delta).toFixed(3)}`}
+                </td>
+                <td className="py-1.5 pr-3 text-right">{interval(s.average_precision_delta_interval, 3)}</td>
+                <td className="py-1.5 pr-3 text-right">
+                  {s.share_candidate_better === null ? "n/e" : `${Math.round(s.share_candidate_better * 100)}% of resamples`}
                 </td>
                 <td className="py-1.5 pr-3 text-right">{ratio(s.baseline.known_label_recall)}</td>
                 <td className="py-1.5 text-right">{ratio(s.candidate.known_label_recall)}</td>
@@ -325,6 +354,8 @@ function SplitWorkspace({
           <p className="mt-2 text-xs text-ink-3">Alerts are emitted at window end, so latency includes up to one window ({duration(meta.window_seconds)}).</p>
         </Panel>
       </div>
+
+      <FaithfulnessPanel metrics={metrics} />
 
       <ModelCard model={model} meta={meta} metrics={metrics} />
 

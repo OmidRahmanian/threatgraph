@@ -64,11 +64,21 @@ whose campaigns pivot from host to host. They were checked on the demo while bei
 so the demo ablation is not blind. M0 and M1 were not changed: their metrics are identical
 before and after the graph features were added (verified when M3 was introduced).
 
-### Not yet implemented
+### M2 · supervised model: gated, not trained
 
-- M2 (supervised, e.g. regularized logistic regression or XGBoost): only if the real-data
-  split has enough positives. Train and validation positives would have to be disjoint in
-  time, never a random event-level split.
+A supervised model is trained only when the training split holds at least
+`supervised_gate.min_positive_windows` known red-team windows from
+`min_positive_accounts` accounts (30 and 5; fixed in `configs/models.yaml` before looking at
+results). The demo has far fewer, so `metrics.json` records the decision and the reason
+instead of a model. If real data passes the gate, the model must keep train and validation
+positives disjoint in time, never using a random event-level split.
+
+### Not implemented (Phase 5, optional)
+
+- Flow, DNS and process logs: LANL publishes them, but they need the same user download and
+  the synthetic fixture has none.
+- A graph neural network benchmark: a heavy dependency for a comparison that a handful of
+  labeled accounts cannot support.
 
 ## Threshold policy
 
