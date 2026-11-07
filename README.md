@@ -93,7 +93,8 @@ Details, the real-data-mode guarantees and a scale rehearsal: [docs/real_data.md
 | Static export with the same payloads (parity tested) | ✅ |
 | Website: overview + ML Experiment Lab (threshold slider, PR curve, score distribution, ranked windows, evidence viewer, model card, ablation) | ✅ |
 | Entity graph tables, bounded graph/entity API, graph features, M3 + M1-vs-M3 ablation | ✅ (ablation not blind on the demo) |
-| Network explorer: window list, directed graph, edge evidence, entity panel, table view | ✅ |
+| Network map: alerted and red-team accounts with their computers, zoom/pan, search, model and day filters, links to hours and incidents | ✅ |
+| Hour explorer: window list, directed graph, edge evidence, entity panel, table view | ✅ |
 | Incident API, replay page (alerts revealed at window end), generated write-ups | ✅ |
 | Methodology page, model cards (Markdown), comparison CSV, API latency in the site | ✅ |
 | Docker stack (read-only API + nginx) verified locally; CI Docker smoke-test job | ✅ |
@@ -135,7 +136,7 @@ The exporter also writes `model_comparison.csv`, `model_cards/*.md` and
 ## Embedding in a personal website
 
 The UI is a self-contained route segment (`/threatgraph`, `/threatgraph/lab`,
-`/threatgraph/explorer`, `/threatgraph/replay`, `/threatgraph/methodology`) built as static
+`/threatgraph/network`, `/threatgraph/explorer`, `/threatgraph/replay`, `/threatgraph/methodology`) built as static
 files. Set `NEXT_PUBLIC_BASE_PATH=/projects` (for example), run `npm run build`, and copy
 `apps/web/out/` to that path on your host. See [docs/deployment.md](docs/deployment.md).
 

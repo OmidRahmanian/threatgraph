@@ -37,7 +37,7 @@ export default function OverviewPage() {
 
       <section aria-labelledby="actions" className="space-y-3">
         <h2 id="actions" className="text-base font-semibold">Explore</h2>
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
           <Link
             href="/threatgraph/lab"
             className="group rounded-xl border border-line bg-panel p-5 transition-colors hover:border-model"
@@ -49,10 +49,20 @@ export default function OverviewPage() {
             </p>
           </Link>
           <Link
+            href="/threatgraph/network"
+            className="group rounded-xl border border-line bg-panel p-5 transition-colors hover:border-model"
+          >
+            <div className="text-sm font-semibold text-ink">Map the network →</div>
+            <p className="mt-2 text-sm text-ink-2">
+              See every alerted and red-team account with the computers it used, zoom into shared computers, filter by day,
+              and jump to the hour or incident behind any node.
+            </p>
+          </Link>
+          <Link
             href="/threatgraph/explorer"
             className="group rounded-xl border border-line bg-panel p-5 transition-colors hover:border-model"
           >
-            <div className="text-sm font-semibold text-ink">Explore the network →</div>
+            <div className="text-sm font-semibold text-ink">Explore one hour →</div>
             <p className="mt-2 text-sm text-ink-2">
               See which computers an alerted account moved between in that hour, with every edge backed by its
               authentication events and every known red-team edge marked.

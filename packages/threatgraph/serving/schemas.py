@@ -464,6 +464,81 @@ class GraphWindow(BaseModel):
     graph: Subgraph
 
 
+class MapWindow(BaseModel):
+    window_id: str
+    window_start: int
+    day: int
+    known_redteam: bool
+    scores: dict[str, WindowScore]
+
+
+class MapAccountScore(BaseModel):
+    max_score: float
+    best_rank: int
+    n_alerts: int
+    alert_days: list[int]
+
+
+class MapAccount(BaseModel):
+    node_id: str
+    label: str
+    n_windows: int
+    n_known_redteam_windows: int
+    n_computers_total: int
+    n_computers_shown: int
+    days: list[int]
+    scores: dict[str, MapAccountScore]
+    windows: list[MapWindow]
+
+
+class MapComputer(BaseModel):
+    node_id: str
+    label: str
+    n_accounts_in_split: int
+    n_accounts_shown: int
+    n_known_redteam: int
+
+
+class MapLinkDay(BaseModel):
+    day: int
+    n_events: int
+    n_fail: int
+    n_known_redteam: int
+    alerted: list[int]  # indexes into NetworkMap.models
+
+
+class MapLink(BaseModel):
+    account: str
+    computer: str
+    role: Literal["source", "destination", "both", "local"]
+    n_events: int
+    n_fail: int
+    n_known_redteam: int
+    first_event_seconds: int
+    last_event_seconds: int
+    by_day: list[MapLinkDay]
+
+
+class NetworkMap(BaseModel):
+    provenance: Provenance
+    split: str
+    models: list[str]
+    start_seconds: int
+    end_seconds: int
+    days: list[int]
+    selection: str
+    semantics: str
+    n_accounts_in_split: int
+    n_accounts_selected: int
+    max_accounts: int
+    max_computers_per_account: int
+    max_links: int
+    computer_order: str
+    accounts: list[MapAccount]
+    computers: list[MapComputer]
+    links: list[MapLink]
+
+
 class SplitWindows(BaseModel):
     split: str
     n_windows: int

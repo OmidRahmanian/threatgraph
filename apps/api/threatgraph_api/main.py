@@ -217,6 +217,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def graph_window(window_id: WindowId) -> S.GraphWindow:
         return ctx().graph_window(window_id)
 
+    @app.get("/api/v1/network", response_model=S.NetworkMap)
+    def network(split: Split = "test") -> S.NetworkMap:
+        return ctx().network_map(split)
+
     @app.get("/api/v1/entities/{entity_id}", response_model=S.EntityDetail)
     def entity(entity_id: EntityId) -> S.EntityDetail:
         return ctx().entity(entity_id)

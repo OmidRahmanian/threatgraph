@@ -112,7 +112,7 @@ export function EntityPanel({
       <p className="rounded-lg border border-line bg-panel-2 p-4 text-sm text-ink-2" data-testid="entity-unavailable">
         {isLiveApi
           ? "No entity with this id in the processed data."
-          : "Details for this entity are not in the static export (it includes computers and accounts at hop 0–1 of each exported window). Run the API to inspect any entity."}
+          : "Details for this entity are not in the static export (it covers accounts and computers near exported windows and on the network maps). Run the API to inspect any entity."}
       </p>
     );
   }

@@ -58,13 +58,17 @@ numbers below; the raw report is [scale_report.json](scale_report.json).
 
 | Stage | Seconds | Peak RSS (MB) | Output |
 |---|---:|---:|---|
-| ingest | 22.5 | 2,713 | 17,204,400 events, 1.41M rows/s |
-| features, 1-day chunks | 16.6 | 2,500 | 1,359,800 windows |
-| features, 1-hour chunks | 39.9 | 2,082 | identical table |
-| graph (1-hour chunks) | 14.5 | 2,047 | 6,069,600 edge rows |
-| train (3 models) | 15.2 | 2,222 | |
-| evaluate | 0.4 | 457 | |
-| export | 13.6 | 1,103 | 7.55 MB bundle |
+| ingest | 20.8 | 2,012 | 17,204,400 events, 1.45M rows/s |
+| features, 1-day chunks | 19.2 | 2,248 | 1,359,800 windows |
+| features, 1-hour chunks | 49.4 | 1,518 | identical table |
+| graph (1-hour chunks) | 16.2 | 1,601 | 6,069,600 edge rows |
+| train (3 models) | 18.4 | 1,665 | |
+| evaluate | 425.4 | 973 | |
+| export | 15.8 | 1,007 | 8.59 MB bundle, including both network maps |
+
+Evaluate is dominated by the account cluster bootstrap (1,000 resamples for every model, split
+and paired comparison). Its time grows with the number of windows, so on LANL expect it to be
+the slowest stage; lower `uncertainty.n_boot` in `configs/models.yaml` for a first pass.
 
 That is 4.3M events per day. LANL averages about 18M events per day, roughly four times more,
 and its real entity counts and repetition differ. With 1-day chunks, feature memory grew with

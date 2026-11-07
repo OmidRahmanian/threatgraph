@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from functools import cached_property
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import polars as pl
@@ -55,7 +55,7 @@ MODEL_DESCRIPTIONS = {
         "without labels. Its score ranks unusualness; it is not a probability of compromise."
     ),
 }
-IMPLEMENTED_VIEWS = ["overview", "lab", "explorer", "replay", "methodology", "drift"]
+IMPLEMENTED_VIEWS = ["overview", "lab", "network", "explorer", "replay", "methodology", "drift"]
 MAX_EVIDENCE = 40
 # Per-split cap on exported/served score rows (real LANL splits can hold hundreds of thousands).
 SCORE_TABLE_MAX_ROWS = 10_000
@@ -72,6 +72,21 @@ GRAPH_SEMANTICS = (
 TRUNCATION_ORDER = (
     "hop, then edges first observed in the range, then failures, then event count "
     "(red-team labels are not used to choose what is shown)"
+)
+MAP_MAX_ACCOUNTS = 60
+MAP_MAX_COMPUTERS_PER_ACCOUNT = 40
+# Total link budget: accounts are added in selection order until it is reached, which keeps
+# one map file under the static export's per-file cap on real-data splits.
+MAP_MAX_LINKS = 1200
+MAP_SEMANTICS = (
+    "Accounts and computers are both nodes. A link means the account authenticated from "
+    "(source) or to (destination) that computer during the split; 'local' means source and "
+    "destination were the same computer. Links aggregate non-LogOff events of in-scope "
+    "accounts. A model alert means an hour was unusual; only the red-team file marks activity "
+    "as known malicious. Graph structure is context for an analyst, not evidence of compromise."
+)
+MAP_COMPUTER_ORDER = (
+    "event count, then name (red-team labels are not used to choose which computers are shown)"
 )
 ENTITY_SCOPE = (
     "Counts cover the processed time window and the graph scope: non-LogOff events of in-scope "
@@ -795,6 +810,235 @@ class ServingContext:
             max_edges=self.cfg.graph.export_max_edges,
         )
         return S.GraphWindow(provenance=self.provenance, window=summary, graph=graph)
+
+    def network_map(self, split: str) -> S.NetworkMap:
+        """Account-computer map of one evaluated split, around alerted and red-team accounts."""
+        if split not in EVAL_SPLITS:
+            raise NotFoundError(split)
+        lo, hi = self.cfg.splits.boundaries_seconds()[split]
+        models = self.models
+        flag = {m: f"flag__{m}" for m in models}
+        part = self._ranked.filter(pl.col("split") == split).with_columns(
+            (pl.col(f"score__{m}") >= model.threshold).alias(flag[m]) for m, model in models.items()
+        )
+        any_flag = pl.any_horizontal(list(flag.values()))
+        per_account = part.group_by("src_principal").agg(
+            pl.min_horizontal(f"rank__{m}" for m in models).min().alias("best_rank"),
+            any_flag.any().alias("alerted"),
+            (pl.col("label") == 1).any().alias("labeled"),
+        )
+        candidates = per_account.filter(pl.col("alerted") | pl.col("labeled"))
+        labeled = candidates.filter("labeled").sort("best_rank", "src_principal")
+        others = candidates.filter(~pl.col("labeled")).sort("best_rank", "src_principal")
+        keep = max(0, MAP_MAX_ACCOUNTS - labeled.height)
+        chosen = pl.concat([labeled, others.head(keep)])["src_principal"].to_list()
+
+        in_split = self.graph_edges.filter(pl.col("window_start").is_between(lo, hi - 1))
+        edges = (
+            in_split.filter(pl.col("src_principal").is_in(chosen))
+            .collect()
+            .join(
+                part.select("src_principal", "window_start", *flag.values()),
+                on=["src_principal", "window_start"],
+                how="left",
+            )
+            .with_columns(pl.col(c).fill_null(False) for c in flag.values())
+            .with_columns((pl.col("window_start") // DAY_SECONDS).alias("day"))
+        )
+        local = pl.col("src_computer") == pl.col("dst_computer")
+        stats = ["n_events", "n_fail", "n_known_redteam", "first_t", "last_t", "day"]
+        roles = pl.concat(
+            [
+                edges.filter(local).select(
+                    "src_principal",
+                    pl.col("src_computer").alias("computer"),
+                    pl.lit("local").alias("r"),
+                    *stats,
+                    *flag.values(),
+                ),
+                edges.filter(~local).select(
+                    "src_principal",
+                    pl.col("src_computer").alias("computer"),
+                    pl.lit("source").alias("r"),
+                    *stats,
+                    *flag.values(),
+                ),
+                edges.filter(~local).select(
+                    "src_principal",
+                    pl.col("dst_computer").alias("computer"),
+                    pl.lit("destination").alias("r"),
+                    *stats,
+                    *flag.values(),
+                ),
+            ]
+        )
+        counts = ["n_events", "n_fail", "n_known_redteam"]
+        per_day = roles.group_by("src_principal", "computer", "day").agg(
+            pl.col("r").unique().alias("roles"),
+            *(pl.col(c).sum() for c in counts),
+            pl.col("first_t").min(),
+            pl.col("last_t").max(),
+            *(pl.col(c).any().alias(c) for c in flag.values()),
+        )
+        links = (
+            per_day.sort("day")
+            .group_by("src_principal", "computer")
+            .agg(
+                pl.col("roles").list.explode(keep_nulls=False, empty_as_null=False).unique().sort(),
+                *(pl.col(c).sum() for c in counts),
+                pl.col("first_t").min(),
+                pl.col("last_t").max(),
+                *(pl.col(c).any() for c in flag.values()),
+                pl.struct("day", *counts, *flag.values()).alias("by_day"),
+            )
+        )
+        links = links.sort(
+            ["src_principal", "n_events", "computer"], descending=[False, True, False]
+        ).with_columns((pl.int_range(pl.len()).over("src_principal") + 1).alias("_order"))
+        shown = links.filter(pl.col("_order") <= MAP_MAX_COMPUTERS_PER_ACCOUNT)
+        n_shown_by_account = dict(shown.group_by("src_principal").agg(pl.len()).iter_rows())
+        budget, fitted = MAP_MAX_LINKS, []
+        for p in chosen:
+            n = n_shown_by_account.get(p, 0)
+            if n > budget:
+                break
+            budget -= n
+            fitted.append(p)
+        chosen = fitted
+        shown = shown.filter(pl.col("src_principal").is_in(chosen)).sort("src_principal", "_order")
+        computers = shown["computer"].unique().to_list()
+        accounts_in_split = (
+            pl.concat(
+                [
+                    in_split.select("src_principal", pl.col("src_computer").alias("computer")),
+                    in_split.select("src_principal", pl.col("dst_computer").alias("computer")),
+                ]
+            )
+            .filter(pl.col("computer").is_in(computers))
+            .group_by("computer")
+            .agg(pl.col("src_principal").n_unique().alias("n"))
+            .collect()
+        )
+        n_in_split = dict(accounts_in_split.iter_rows())
+        totals = dict(links.group_by("src_principal").agg(pl.len()).iter_rows())
+
+        def role(rs: list[str]) -> Literal["source", "destination", "both", "local"]:
+            if rs == ["local"]:
+                return "local"
+            if rs == ["source"]:
+                return "source"
+            if rs == ["destination"]:
+                return "destination"
+            return "both"
+
+        computer_id = lambda c: self.entity_id("computer", c)  # noqa: E731
+        principal_id = lambda p: self.entity_id("principal", p)  # noqa: E731
+        map_links = [
+            S.MapLink(
+                account=principal_id(r["src_principal"]),
+                computer=computer_id(r["computer"]),
+                role=role(r["roles"]),
+                n_events=r["n_events"],
+                n_fail=r["n_fail"],
+                n_known_redteam=r["n_known_redteam"],
+                first_event_seconds=r["first_t"],
+                last_event_seconds=r["last_t"],
+                by_day=[
+                    S.MapLinkDay(
+                        day=d["day"],
+                        n_events=d["n_events"],
+                        n_fail=d["n_fail"],
+                        n_known_redteam=d["n_known_redteam"],
+                        alerted=[i for i, m in enumerate(models) if d[flag[m]]],
+                    )
+                    for d in r["by_day"]
+                ],
+            )
+            for r in shown.iter_rows(named=True)
+        ]
+        computer_stats = shown.group_by("computer").agg(
+            pl.col("src_principal").n_unique().alias("n_shown"),
+            pl.col("n_known_redteam").sum(),
+        )
+        map_computers = [
+            S.MapComputer(
+                node_id=computer_id(c),
+                label=self.alias(c) or "",
+                n_accounts_in_split=n_in_split.get(c, n_shown),
+                n_accounts_shown=n_shown,
+                n_known_redteam=n_rt,
+            )
+            for c, n_shown, n_rt in computer_stats.sort("computer").iter_rows()
+        ]
+        acct_rows = part.filter(pl.col("src_principal").is_in(chosen))
+        map_accounts = []
+        for p in chosen:
+            rows = acct_rows.filter(pl.col("src_principal") == p).sort("window_start")
+            scores = {}
+            for m in models:
+                hits = rows.filter(pl.col(flag[m]))
+                scores[m] = S.MapAccountScore(
+                    max_score=float(rows[f"score__{m}"].max()),  # type: ignore[arg-type]
+                    best_rank=int(rows[f"rank__{m}"].min()),  # type: ignore[arg-type]
+                    n_alerts=hits.height,
+                    alert_days=hits["day"].unique().sort().to_list(),
+                )
+            notable = rows.filter(pl.any_horizontal(list(flag.values())) | (pl.col("label") == 1))
+            windows = []
+            for r in notable.iter_rows(named=True):
+                s = self._window_summary(r)
+                windows.append(
+                    S.MapWindow(
+                        window_id=s.window_id,
+                        window_start=s.window_start,
+                        day=s.day,
+                        known_redteam=s.label == "known_redteam",
+                        scores=s.scores,
+                    )
+                )
+            map_accounts.append(
+                S.MapAccount(
+                    node_id=principal_id(p),
+                    label=self.alias(p) or "",
+                    n_windows=rows.height,
+                    n_known_redteam_windows=int(rows["label"].sum()),
+                    n_computers_total=totals.get(p, 0),
+                    n_computers_shown=n_shown_by_account.get(p, 0),
+                    days=rows["day"].unique().sort().to_list(),
+                    scores=scores,
+                    windows=windows,
+                )
+            )
+        capped = (
+            [f"{MAP_MAX_ACCOUNTS} accounts (red-team accounts first, then best model rank)"]
+            if candidates.height > MAP_MAX_ACCOUNTS
+            else []
+        )
+        if len(chosen) < min(candidates.height, MAP_MAX_ACCOUNTS):
+            capped.append(f"{MAP_MAX_LINKS} links in the same order")
+        return S.NetworkMap(
+            provenance=self.provenance,
+            split=split,
+            models=list(models),
+            start_seconds=lo,
+            end_seconds=hi,
+            days=list(range(lo // DAY_SECONDS, (hi - 1) // DAY_SECONDS + 1)),
+            selection=(
+                "accounts with at least one window flagged by any model, plus every account with "
+                "a known red-team window in the split"
+                + (f"; capped at {' and '.join(capped)}" if capped else "")
+            ),
+            semantics=MAP_SEMANTICS,
+            n_accounts_in_split=per_account.height,
+            n_accounts_selected=candidates.height,
+            max_accounts=MAP_MAX_ACCOUNTS,
+            max_computers_per_account=MAP_MAX_COMPUTERS_PER_ACCOUNT,
+            max_links=MAP_MAX_LINKS,
+            computer_order=MAP_COMPUTER_ORDER,
+            accounts=map_accounts,
+            computers=map_computers,
+            links=map_links,
+        )
 
     def entity(self, entity_id: str) -> S.EntityDetail:
         etype, key = self.resolve_entity(entity_id)

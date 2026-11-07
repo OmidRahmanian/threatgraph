@@ -20,6 +20,7 @@ import type {
   Metadata,
   ModelList,
   ModelMetrics,
+  NetworkMap,
   ScoreTable,
   Summary,
 } from "./types";
@@ -97,6 +98,7 @@ export const api = {
   /** Resolves to null when the static export did not include this entity (hop-2 entities). */
   entity: (entityId: string) =>
     getJsonOrNull<EntityDetail>(route(`/entities/${encodeURIComponent(entityId)}`, `entities/${staticSlug(entityId)}.json`)),
+  network: (split: EvalSplit) => getJson<NetworkMap>(route(`/network?split=${split}`, `network/${split}.json`)),
   drift: () => getJson<Drift>(route("/drift", "drift.json")),
   incidents: () => getJson<IncidentIndex>(route("/incidents", "incidents/index.json")),
   incident: (id: string) =>

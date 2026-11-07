@@ -105,6 +105,8 @@ def test_api_matches_static_export(built) -> None:
         "incidents/index.json": "/api/v1/incidents",
         f"incidents/{static_slug(iid)}.json": f"/api/v1/incidents/{iid}",
         "graph/windows/test/index.json": "/api/v1/graph/windows?split=test",
+        "network/test.json": "/api/v1/network?split=test",
+        "network/validation.json": "/api/v1/network?split=validation",
         f"graph/windows/{static_slug(wid)}.json": f"/api/v1/graph/windows/{wid}",
         f"entities/{static_slug(eid)}.json": f"/api/v1/entities/{eid}",
     }
@@ -230,6 +232,108 @@ def test_graph_api_bounds(built) -> None:
     capped = client.get(ok + "&hops=2&max_edges=3").json()
     assert len(capped["edges"]) <= 3
     assert capped["n_edges_total"] >= len(capped["edges"])
+
+
+@pytest.mark.parametrize("split", ["validation", "test"])
+def test_network_map_is_grounded(built, split) -> None:
+    """Map selection, per-day link counts, labels and alerts all match the pipeline outputs."""
+    cfg, _, ctx, _, client = built
+    net = ctx.network_map(split)
+    assert client.get("/api/v1/network?split=train").status_code == 422
+    lo, hi = cfg.splits.boundaries_seconds()[split]
+    preds = ctx.predictions.filter(pl.col("split") == split)
+    models = net.models
+    flags = {m: pl.col(f"score__{m}") >= ctx.models[m].threshold for m in models}
+    alerted = set(preds.filter(pl.any_horizontal(list(flags.values())))["src_principal"])
+    labeled = set(preds.filter(pl.col("label") == 1)["src_principal"])
+    assert labeled, "fixture must have red-team accounts in every evaluated split"
+    mapped = {ctx.resolve_entity(a.node_id)[1] for a in net.accounts}
+    qualifying = alerted | labeled
+    assert net.n_accounts_selected == len(qualifying)
+    assert labeled <= mapped <= qualifying
+    assert len(mapped) == min(len(qualifying), payloads.MAP_MAX_ACCOUNTS)
+    # Past the cap, the remaining slots go to the best-ranked accounts by any model.
+    best = (
+        preds.with_columns(
+            pl.min_horizontal(
+                pl.col(f"score__{m}").rank("ordinal", descending=True) for m in models
+            ).alias("r")
+        )
+        .group_by("src_principal")
+        .agg(pl.col("r").min())
+    )
+    best_rank = dict(best.iter_rows())
+    left_out = qualifying - mapped
+    assert ("capped at" in net.selection) == bool(left_out)
+    if left_out:
+        assert max(best_rank[p] for p in mapped - labeled) <= min(best_rank[p] for p in left_out)
+
+    edges = (
+        ctx.graph_edges.filter(pl.col("window_start").is_between(lo, hi - 1))
+        .collect()
+        .join(
+            preds.select("src_principal", "window_start", *(e.alias(m) for m, e in flags.items())),
+            on=["src_principal", "window_start"],
+            how="left",
+        )
+        .with_columns((pl.col("window_start") // 86_400).alias("day"))
+    )
+    for a in net.accounts:
+        p = ctx.resolve_entity(a.node_id)[1]
+        rows = preds.filter(pl.col("src_principal") == p)
+        for m in models:
+            hits = rows.filter(flags[m])
+            assert a.scores[m].n_alerts == hits.height
+            assert a.scores[m].alert_days == sorted(set(hits["day"]))
+        assert a.n_known_redteam_windows == rows["label"].sum()
+        notable = rows.filter(pl.any_horizontal(list(flags.values())) | (pl.col("label") == 1))
+        assert [w.window_start for w in a.windows] == sorted(notable["window_start"])
+        assert a.n_computers_shown <= min(
+            a.n_computers_total, payloads.MAP_MAX_COMPUTERS_PER_ACCOUNT
+        )
+
+    computers = {c.node_id for c in net.computers}
+    assert len(net.links) <= payloads.MAP_MAX_LINKS
+    for link in net.links:
+        assert link.account in {a.node_id for a in net.accounts} and link.computer in computers
+        p = ctx.resolve_entity(link.account)[1]
+        c = ctx.resolve_entity(link.computer)[1]
+        own = edges.filter(
+            (pl.col("src_principal") == p)
+            & ((pl.col("src_computer") == c) | (pl.col("dst_computer") == c))
+        )
+        expect = {
+            d["day"]: d
+            for d in own.group_by("day")
+            .agg(
+                pl.col("n_events").sum(),
+                pl.col("n_known_redteam").sum(),
+                *(pl.col(m).fill_null(False).any() for m in models),
+            )
+            .iter_rows(named=True)
+        }
+        assert [d.day for d in link.by_day] == sorted(expect)
+        for d in link.by_day:
+            e = expect[d.day]
+            assert (d.n_events, d.n_known_redteam) == (e["n_events"], e["n_known_redteam"])
+            assert d.alerted == [i for i, m in enumerate(models) if e[m]]
+        assert link.n_events == sum(d.n_events for d in link.by_day)
+        is_src = own.filter(pl.col("src_computer") == c).height > 0
+        is_dst = own.filter(pl.col("dst_computer") == c).height > 0
+        is_local = own.filter(pl.col("src_computer") == pl.col("dst_computer")).height > 0
+        if link.role == "local":
+            assert (
+                is_local
+                and own.height
+                == own.filter(pl.col("src_computer") == pl.col("dst_computer")).height
+            )
+        elif link.role == "source":
+            assert is_src and not is_dst
+        elif link.role == "destination":
+            assert is_dst and not is_src
+    # Every known red-team event of a mapped account on a shown computer is on the map.
+    rt = sum(link.n_known_redteam for link in net.links)
+    assert rt == sum(c.n_known_redteam for c in net.computers) > 0
 
 
 def test_incidents_are_grounded_and_match_lab_latency(built) -> None:

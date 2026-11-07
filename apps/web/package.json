@@ -12,6 +12,7 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "d3-force": "3.0.0",
     "next": "16.4.5",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -20,6 +21,7 @@
   "devDependencies": {
     "@playwright/test": "^1.65.0",
     "@tailwindcss/turbopack": "^4",
+    "@types/d3-force": "3.0.10",
     "@types/node": "^24.19.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",

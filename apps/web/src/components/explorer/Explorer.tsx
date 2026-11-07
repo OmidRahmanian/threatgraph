@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { api, useLoad } from "@/lib/data";
 import { int, relTime, score as fmtScore, windowLabel } from "@/lib/format";
@@ -60,7 +61,7 @@ function ExplorerBody({ index, models }: { index: GraphWindowIndex; models: Mode
     <div className="space-y-6 fade-in">
       <header className="space-y-3">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">Network explorer</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Hour explorer</h1>
           <ProvenanceBadge provenance={index.provenance} />
         </div>
         <p className="max-w-3xl text-sm leading-relaxed text-ink-2">
@@ -193,6 +194,13 @@ function WindowGraph({
           }
           right={
             <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href={`/threatgraph/network/?${new URLSearchParams({ split: w.split, model: modelId, node: w.principal_id })}`}
+                className="rounded-md border border-line px-2 py-1 text-xs text-ink-2 hover:bg-panel-2 hover:text-ink"
+                data-testid="to-network-map"
+              >
+                On the network map →
+              </Link>
               <AlertBadge flagged={s.flagged} />
               {w.label === "known_redteam" ? <KnownRedteamBadge count={w.n_labeled_events} /> : <UnlabeledBadge />}
             </div>

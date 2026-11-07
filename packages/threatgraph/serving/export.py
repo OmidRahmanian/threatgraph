@@ -12,6 +12,7 @@ The file layout mirrors the API routes under `/api/v1`, so the website can read 
     models/{id}/predictions/{split}.json   GET /api/v1/models/{id}/predictions?split=&limit=100
     models/{id}/explanations/{split}.json  bundle of GET /api/v1/models/{id}/explanations/{window}
     graph/windows/{split}/index.json       GET /api/v1/graph/windows?split=
+    network/{split}.json                   GET /api/v1/network?split=
     graph/windows/{slug}.json              GET /api/v1/graph/windows/{window_id}
     entities/{slug}.json                   GET /api/v1/entities/{entity_id}
     incidents/index.json                   GET /api/v1/incidents (scope=evaluated)
@@ -21,7 +22,8 @@ The file layout mirrors the API routes under `/api/v1`, so the website can read 
 
 `slug` is the id with every character outside [A-Za-z0-9._-] replaced by "_"
 (apps/web/src/lib/data.ts uses the same rule). Only entities that appear in an exported
-window graph at hop 0 or 1 are written; hop-2 entity details need the live API.
+window graph at hop 0 or 1, every account on a network map, and each map's
+EXPORT_MAP_COMPUTERS most-shared computers are written; other entity details need the live API.
 """
 
 from __future__ import annotations
@@ -38,9 +40,12 @@ from threatgraph.serving.downloads import downloads
 from threatgraph.serving.payloads import ServingContext
 
 EXPORT_PREDICTION_LIMIT = 100
+# Computer profiles precomputed per network map, most-shared first; the rest need the live API.
+EXPORT_MAP_COMPUTERS = 40
 # Public payload budget. Pages fetch files lazily, so the per-file cap is what a visitor waits
-# for; the total bounds what a deployment ships.
-MAX_BUNDLE_BYTES = 8 * 1024 * 1024
+# for; the total bounds what a deployment ships. The scale rehearsal (docs/scale_report.json)
+# lands under 9 MB with the network maps, so 12 MB leaves room without hiding growth.
+MAX_BUNDLE_BYTES = 12 * 1024 * 1024
 MAX_FILE_BYTES = 1024 * 1024
 
 
@@ -88,6 +93,12 @@ def export_bundle(ctx: ServingContext, out_dir: Path) -> dict[str, Any]:
         put(f"graph/windows/{slug}.json", gw)
         entity_ids.update(n.node_id for n in gw.graph.nodes if n.hop <= 1)
         entity_ids.update(p.principal_id for p in gw.graph.principals if p.hop <= 1)
+    for split in EVAL_SPLITS:
+        net = ctx.network_map(split)
+        put(f"network/{split}.json", net)
+        entity_ids.update(a.node_id for a in net.accounts)
+        shared = sorted(net.computers, key=lambda c: (-c.n_accounts_shown, c.node_id))
+        entity_ids.update(c.node_id for c in shared[:EXPORT_MAP_COMPUTERS])
     for e in sorted(entity_ids):
         slug = static_slug(e)
         if slugs.setdefault(slug, e) != e:

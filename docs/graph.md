@@ -1,4 +1,4 @@
-# Entity graph, network explorer and incident replay
+# Entity graph, network map, hour explorer and incident replay
 
 ## Model
 
@@ -34,6 +34,34 @@ returns that window's 2-hop graph. `GET /api/v1/entities/{entity_id}` returns an
 evidence summary. The static export writes the same payloads.
 `tests/integration/test_end_to_end.py` checks parity and that every edge's sample events
 really have that account, source, destination and time range.
+
+## Network map
+
+`GET /api/v1/network?split=validation|test` (static: `network/{split}.json`) is a whole-split
+view for the `/threatgraph/network` page:
+
+- **Accounts:** every account with a window flagged by any model, plus every account with a
+  known red-team window. Past `MAP_MAX_ACCOUNTS` (60), red-team accounts come first, then the
+  best model rank. The label-dependent part of that order is stated in the payload's
+  `selection` text and on the page.
+- **Computers:** the computers each mapped account authenticated from or to, at most
+  `MAP_MAX_COMPUTERS_PER_ACCOUNT` (40) per account by event count, then name. Labels are not
+  used to choose computers. A total budget of `MAP_MAX_LINKS` (1,200) links keeps one file
+  under the export's 1 MB per-file cap on real-data splits.
+- **Links:** one per (account, computer), with its role (source, destination, both or local)
+  and a per-day breakdown of events, failures, known red-team events, and which models
+  flagged a window containing it. The page's day filter recounts everything from that
+  breakdown, so a link is not shown as red-team on a day it carried no red-team events.
+
+In the drawing, accounts are circles and computers squares; a blue ring is a model alert in the
+selected days, and an orange diamond or link is the red-team label. The force layout
+(`apps/web/src/lib/forceLayout.ts`, d3-force) is deterministic. Computers shared by at least a
+fifth of the mapped accounts (and at least five) barely pull on the layout, sit at their accounts'
+centroid, and get faint links until a node is hovered. Without that, a handful of popular
+servers pull every account into one ball. Selecting an account links to each of its alerted or
+red-team hours in the hour explorer and to its red-team incident in the replay.
+`test_network_map_is_grounded` recomputes the selection and every per-day link count from the
+graph edges and predictions.
 
 ## Graph features
 

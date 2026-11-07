@@ -40,7 +40,7 @@ artifacts/<ds>/metrics.json · reports/evaluation.md · runs/<stage>.json (time,
 ## Why these choices
 
 - **Batch first, serve small.** Heavy work (parsing, features, training) happens offline. The
-  public site only reads a static bundle (capped at 8 MB, 1 MB per file, fetched lazily per
+  public site only reads a static bundle (capped at 12 MB, 1 MB per file, fetched lazily per
   page), so it never trains or scans raw data.
 - **pyarrow streaming + Polars.** Ingest memory is bounded by the block size, not the file size.
   The real `auth.txt.gz` is about 7 GB compressed and roughly 1 billion rows. When the file is

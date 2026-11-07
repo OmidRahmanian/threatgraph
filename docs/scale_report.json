@@ -14,50 +14,50 @@
     {
       "stage": "ingest",
       "chunk_seconds": 3600,
-      "seconds": 22.5,
-      "peak_rss_mb": 2713,
+      "seconds": 20.8,
+      "peak_rss_mb": 2012,
       "events": 17204400,
-      "rows_per_second": 1411321.6
+      "rows_per_second": 1446488.0
     },
     {
       "stage": "features",
       "chunk_seconds": 86400,
-      "seconds": 16.6,
-      "peak_rss_mb": 2500,
+      "seconds": 19.2,
+      "peak_rss_mb": 2248,
       "windows": 1359800
     },
     {
       "stage": "features",
       "chunk_seconds": 3600,
-      "seconds": 39.9,
-      "peak_rss_mb": 2082,
+      "seconds": 49.4,
+      "peak_rss_mb": 1518,
       "windows": 1359800
     },
     {
       "stage": "graph",
       "chunk_seconds": 3600,
-      "seconds": 14.5,
-      "peak_rss_mb": 2047,
+      "seconds": 16.2,
+      "peak_rss_mb": 1601,
       "edge_rows": 6069600
     },
     {
       "stage": "train",
       "chunk_seconds": 3600,
-      "seconds": 15.2,
-      "peak_rss_mb": 2222
+      "seconds": 18.4,
+      "peak_rss_mb": 1665
     },
     {
       "stage": "evaluate",
       "chunk_seconds": 3600,
-      "seconds": 0.4,
-      "peak_rss_mb": 457
+      "seconds": 425.4,
+      "peak_rss_mb": 973
     },
     {
       "stage": "export",
       "chunk_seconds": 3600,
-      "seconds": 13.6,
-      "peak_rss_mb": 1103,
-      "bundle_bytes": 7552066
+      "seconds": 15.8,
+      "peak_rss_mb": 1007,
+      "bundle_bytes": 8591302
     }
   ]
 }

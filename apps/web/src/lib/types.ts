@@ -515,3 +515,79 @@ export interface Drift {
   days: DriftDay[];
   semantics: string;
 }
+
+export interface MapWindow {
+  window_id: string;
+  window_start: number;
+  day: number;
+  known_redteam: boolean;
+  scores: Record<string, WindowScore>;
+}
+
+export interface MapAccountScore {
+  max_score: number;
+  best_rank: number;
+  n_alerts: number;
+  alert_days: number[];
+}
+
+export interface MapAccount {
+  node_id: string;
+  label: string;
+  n_windows: number;
+  n_known_redteam_windows: number;
+  n_computers_total: number;
+  n_computers_shown: number;
+  days: number[];
+  scores: Record<string, MapAccountScore>;
+  windows: MapWindow[];
+}
+
+export interface MapComputer {
+  node_id: string;
+  label: string;
+  n_accounts_in_split: number;
+  n_accounts_shown: number;
+  n_known_redteam: number;
+}
+
+export interface MapLinkDay {
+  day: number;
+  n_events: number;
+  n_fail: number;
+  n_known_redteam: number;
+  /** Indexes into NetworkMap.models of the models that flagged a window containing this link on this day. */
+  alerted: number[];
+}
+
+export interface MapLink {
+  account: string;
+  computer: string;
+  role: "source" | "destination" | "both" | "local";
+  n_events: number;
+  n_fail: number;
+  n_known_redteam: number;
+  first_event_seconds: number;
+  last_event_seconds: number;
+  by_day: MapLinkDay[];
+}
+
+export interface NetworkMap {
+  provenance: Provenance;
+  split: EvalSplit;
+  models: string[];
+  start_seconds: number;
+  end_seconds: number;
+  days: number[];
+  selection: string;
+  semantics: string;
+  n_accounts_in_split: number;
+  n_accounts_selected: number;
+  max_accounts: number;
+  max_computers_per_account: number;
+  max_links: number;
+  computer_order: string;
+  accounts: MapAccount[];
+  computers: MapComputer[];
+  links: MapLink[];
+}
