@@ -21,7 +21,7 @@ SEVERITIES: tuple[Severity, ...] = ("info", "low", "medium", "high", "critical")
 
 
 def severity_rank(s: str) -> int:
-    return SEVERITIES.index(s)  # type: ignore[arg-type]
+    return SEVERITIES.index(s)  # type: ignore[arg-type,unused-ignore]
 
 
 class Retention(BaseModel):

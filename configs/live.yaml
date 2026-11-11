@@ -49,6 +49,7 @@ detection:
     http_request_burst:        { severity: low,    params: { window_seconds: 60, min_requests: 600 } }
     http_error_spike:          { severity: medium, params: { window_seconds: 300, min_requests: 30, min_5xx_ratio: 0.25 } }
     request_volume_deviation:  { severity: info,   params: { bucket_seconds: 300, history_hours: 24, min_history_buckets: 48, robust_z: 8.0, min_requests: 200 } }
+    error_rate_deviation:      { severity: low,    params: { bucket_seconds: 300, history_hours: 24, min_history_buckets: 48, robust_z: 8.0, min_requests: 20 } }
     availability:              { severity: high,   params: { consecutive_failures: 2, critical_after_seconds: 900 } }
     tls_expiry:                { severity: medium, params: { warn_days: 14, high_days: 3 } }
     service_failure:           { severity: medium }

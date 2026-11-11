@@ -296,7 +296,8 @@ class LiveStore:
         limit: int = 10_000,
         order: str = "ASC",
     ) -> list[dict[str, Any]]:
-        where, params = ["1=1"], []
+        where: list[str] = ["1=1"]
+        params: list[Any] = []
         if kinds:
             kinds = list(kinds)
             where.append(f"kind IN ({','.join('?' * len(kinds))})")
