@@ -18,6 +18,11 @@ dependencies = [
   "uvicorn[standard]>=0.30",
 ]
 
+[project.scripts]
+threatgraph-live = "threatgraph_live.cli:main"
+threatgraph-agent = "threatgraph.live.agent:main"
+threatgraph-probe = "threatgraph.live.probe:main"
+
 [project.optional-dependencies]
 dev = [
   "httpx>=0.27",
@@ -32,7 +37,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["packages/threatgraph", "apps/api/threatgraph_api"]
+packages = ["packages/threatgraph", "apps/api/threatgraph_api", "apps/live/threatgraph_live"]
 
 [tool.ruff]
 line-length = 100
@@ -44,13 +49,13 @@ select = ["E", "F", "I", "B", "UP", "SIM", "NPY", "RUF"]
 ignore = ["E501", "RUF001", "RUF002", "RUF003"]  # line length is enforced by `ruff format`
 
 [tool.ruff.lint.isort]
-known-first-party = ["threatgraph", "threatgraph_api", "tests"]
+known-first-party = ["threatgraph", "threatgraph_api", "threatgraph_live", "tests"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["packages/threatgraph", "apps/api/threatgraph_api"]
+files = ["packages/threatgraph", "apps/api/threatgraph_api", "apps/live/threatgraph_live"]
 explicit_package_bases = true
-mypy_path = ["packages", "apps/api"]
+mypy_path = ["packages", "apps/api", "apps/live"]
 ignore_missing_imports = true
 warn_unused_ignores = true
 check_untyped_defs = true
