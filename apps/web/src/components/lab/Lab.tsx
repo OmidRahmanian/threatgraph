@@ -18,6 +18,7 @@ import {
   UnlabeledBadge,
 } from "../ui";
 import { PRCurve, ScoreDistribution } from "./Charts";
+import { ResearchDatasets } from "./Datasets";
 import { ExplanationView } from "./ExplanationView";
 import { DriftPanel, FaithfulnessPanel, SupervisedNote } from "./Phase5";
 import { ThresholdPanel } from "./ThresholdPanel";
@@ -55,6 +56,8 @@ export function Lab() {
           compromise.
         </p>
       </header>
+
+      <ResearchDatasets />
 
       <Panel>
         <SectionTitle

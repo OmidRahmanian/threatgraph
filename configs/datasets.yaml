@@ -48,3 +48,28 @@ datasets:
     graph: { hub_max_principals: 15, sample_events_per_edge: 3, export_max_edges: 60 }
     splits: { warmup_end_day: 2, train_end_day: 8, validation_end_day: 11, test_end_day: 14 }
     seed: 42
+
+  # Smoke run on the real files: the first four days only. It exists to measure ingest
+  # throughput, memory and data quality on real LANL data before the full window, not to
+  # report detection performance (its validation and test days may hold no red-team records,
+  # in which case those metrics are reported as not estimable).
+  lanl_smoke:
+    mode: lanl
+    description: >-
+      First four days of the LANL 2015 auth file. Pipeline throughput and memory check on real
+      data; not an evaluation of detection performance.
+    raw_dir: data/raw/lanl
+    files:
+      auth: auth.txt.gz
+      redteam: redteam.txt.gz
+    processed_dir: data/processed/lanl_smoke
+    artifacts_dir: artifacts/lanl_smoke
+    time_window: { start_seconds: 0, end_seconds: 345599 }
+    ingest: { block_size_bytes: 67108864, assume_sorted: true, hash_source_files: false }
+    redteam: { user_field: source }
+    features:
+      { window_seconds: 3600, burst_seconds: 300, baseline_windows: 24, principals: users_only,
+        chunk_seconds: 3600 }
+    graph: { hub_max_principals: 15, sample_events_per_edge: 3, export_max_edges: 60 }
+    splits: { warmup_end_day: 1, train_end_day: 2, validation_end_day: 3, test_end_day: 4 }
+    seed: 42

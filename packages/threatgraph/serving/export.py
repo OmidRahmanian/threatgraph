@@ -7,6 +7,7 @@ The file layout mirrors the API routes under `/api/v1`, so the website can read 
     drift.json                             GET /api/v1/drift
     models.json                            GET /api/v1/models
     benchmarks.json                        GET /api/v1/benchmarks
+    datasets.json                          GET /api/v1/datasets
     models/{id}/metrics.json               GET /api/v1/models/{id}/metrics
     models/{id}/scores/{split}.json        GET /api/v1/models/{id}/scores?split=
     models/{id}/predictions/{split}.json   GET /api/v1/models/{id}/predictions?split=&limit=100
@@ -36,6 +37,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from threatgraph.pipeline import EVAL_SPLITS
+from threatgraph.serving.datasets import dataset_status_list
 from threatgraph.serving.downloads import downloads
 from threatgraph.serving.payloads import ServingContext
 
@@ -60,7 +62,9 @@ def _write(path: Path, payload: BaseModel) -> int:
     return len(data.encode())
 
 
-def export_bundle(ctx: ServingContext, out_dir: Path) -> dict[str, Any]:
+def export_bundle(
+    ctx: ServingContext, out_dir: Path, datasets_config: Path | None = None
+) -> dict[str, Any]:
     if out_dir.exists():
         shutil.rmtree(out_dir)
     sizes: dict[str, int] = {}
@@ -71,6 +75,7 @@ def export_bundle(ctx: ServingContext, out_dir: Path) -> dict[str, Any]:
     put("metadata.json", ctx.metadata())
     put("summary.json", ctx.summary())
     put("drift.json", ctx.drift())
+    put("datasets.json", dataset_status_list(ctx.mcfg, datasets_config, ctx.provenance))
     put("models.json", ctx.model_list())
     for model_id in ctx.mcfg.models:
         put(f"models/{model_id}/metrics.json", ctx.model_metrics(model_id))

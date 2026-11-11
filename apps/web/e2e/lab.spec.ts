@@ -102,3 +102,16 @@ test("intervals, drift and explanation faithfulness come from the bundle", async
   await expect(page.getByTestId("faithfulness-table").locator("tbody tr")).toHaveCount(faith.results.length);
   await expect(page.getByTestId("supervised-note")).toContainText(String(models.supervised_model.train_positive_windows));
 });
+
+test("lab lists research datasets and shows real LANL as pending unless evaluated", async ({ page }) => {
+  const status = read("datasets.json") as { datasets: { dataset: string; mode: string; status: string }[] };
+  await page.goto("/threatgraph/lab/");
+  const table = page.getByTestId("dataset-status");
+  await expect(table).toBeVisible();
+  for (const d of status.datasets) {
+    await expect(table).toContainText(d.dataset);
+    if (d.mode === "lanl" && d.status !== "evaluated") {
+      await expect(table.getByTestId(`dataset-state-${d.status}`).first()).toContainText("Pending");
+    }
+  }
+});

@@ -36,9 +36,10 @@ def built(tmp_path_factory: pytest.TempPathFactory):
     pipeline.run_train(cfg, mcfg)
     pipeline.run_evaluate(cfg, mcfg)
     ctx = ServingContext(cfg, mcfg, public_ids=True)
-    bundle = export_bundle(ctx, root / "export")
+    datasets_yaml = write_datasets_yaml(root / "datasets.yaml", cfg)
+    bundle = export_bundle(ctx, root / "export", datasets_yaml)
     settings = Settings()
-    settings.datasets_config = str(write_datasets_yaml(root / "datasets.yaml", cfg))
+    settings.datasets_config = str(datasets_yaml)
     settings.dataset = cfg.name
     with TestClient(create_app(settings)) as client:
         yield cfg, mcfg, ctx, bundle, client
@@ -108,6 +109,7 @@ def test_api_matches_static_export(built) -> None:
     iid = incidents["incidents"][0]["incident_id"]
     routes |= {
         "drift.json": "/api/v1/drift",
+        "datasets.json": "/api/v1/datasets",
         "incidents/index.json": "/api/v1/incidents",
         f"incidents/{static_slug(iid)}.json": f"/api/v1/incidents/{iid}",
         "graph/windows/test/index.json": "/api/v1/graph/windows?split=test",
@@ -483,3 +485,15 @@ def test_phase5_outputs_are_complete_and_consistent(built) -> None:
     assert "log_prior_windows" in drift.expected_drift
     models = ctx.model_list()
     assert models.ablations[0].splits[1].average_precision_delta_interval is not None
+
+
+def test_dataset_status_reports_evaluated_only_with_fresh_metrics(built) -> None:
+    cfg, *_, client = built
+    status = client.get("/api/v1/datasets").json()
+    (demo,) = [d for d in status["datasets"] if d["dataset"] == cfg.name]
+    assert demo["status"] == "evaluated"
+    metrics = json.loads(pipeline.metrics_path(cfg).read_text())
+    for m in demo["models"]:
+        test = metrics["models"][m["model_id"]]["splits"]["test"]
+        assert m["test_known_positive_windows"] == test["n_positive_windows"]
+        assert m["test_alerts"] == test["operating_point"]["alerts"]

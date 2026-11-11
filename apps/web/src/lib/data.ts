@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import type {
   Benchmarks,
+  DatasetStatusList,
   Drift,
   EntityDetail,
   EvalSplit,
@@ -100,6 +101,8 @@ export const api = {
     getJsonOrNull<EntityDetail>(route(`/entities/${encodeURIComponent(entityId)}`, `entities/${staticSlug(entityId)}.json`)),
   network: (split: EvalSplit) => getJson<NetworkMap>(route(`/network?split=${split}`, `network/${split}.json`)),
   drift: () => getJson<Drift>(route("/drift", "drift.json")),
+  /** Older bundles have no datasets.json; that resolves to null. */
+  datasets: () => getJsonOrNull<DatasetStatusList>(route("/datasets", "datasets.json")),
   incidents: () => getJson<IncidentIndex>(route("/incidents", "incidents/index.json")),
   incident: (id: string) =>
     getJsonOrNull<Incident>(route(`/incidents/${encodeURIComponent(id)}`, `incidents/${staticSlug(id)}.json`)),

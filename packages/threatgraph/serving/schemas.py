@@ -703,3 +703,37 @@ class Health(BaseModel):
     dataset: str
     mode: str
     detail: str | None = None
+
+
+class DatasetModelResult(BaseModel):
+    model_id: str
+    display_name: str
+    test_average_precision: float | None
+    test_known_positive_windows: int
+    test_alerts: int | None
+
+
+class DatasetStatus(BaseModel):
+    """Where one configured dataset stands. Nothing here is a claim the pipeline did not make:
+    `evaluated` is only set when a fresh metrics.json exists for the current configuration."""
+
+    dataset: str
+    mode: Literal["synthetic", "lanl"]
+    mode_label: str
+    status: Literal["files_missing", "not_processed", "ingested", "stale", "evaluated"]
+    status_detail: str
+    raw_files_present: dict[str, bool]
+    time_window_seconds: list[int | None]
+    rows_accepted: int | None
+    rows_rejected: int | None
+    stage_seconds: dict[str, float]
+    stage_peak_rss_mb: dict[str, float]
+    models: list[DatasetModelResult]
+
+
+class DatasetStatusList(BaseModel):
+    # Provenance of the dataset this bundle/API serves (null when its artifacts are missing).
+    # The list itself covers every configured dataset.
+    provenance: Provenance | None
+    datasets: list[DatasetStatus]
+    semantics: str

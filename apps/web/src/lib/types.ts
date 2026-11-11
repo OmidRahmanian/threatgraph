@@ -593,3 +593,34 @@ export interface NetworkMap {
   computers: MapComputer[];
   links: MapLink[];
 }
+
+export interface DatasetModelResult {
+  model_id: string;
+  display_name: string;
+  test_average_precision: number | null;
+  test_known_positive_windows: number;
+  test_alerts: number | null;
+}
+
+export type DatasetState = "files_missing" | "not_processed" | "ingested" | "stale" | "evaluated";
+
+export interface DatasetStatus {
+  dataset: string;
+  mode: "synthetic" | "lanl";
+  mode_label: string;
+  status: DatasetState;
+  status_detail: string;
+  raw_files_present: Record<string, boolean>;
+  time_window_seconds: (number | null)[];
+  rows_accepted: number | null;
+  rows_rejected: number | null;
+  stage_seconds: Record<string, number>;
+  stage_peak_rss_mb: Record<string, number>;
+  models: DatasetModelResult[];
+}
+
+export interface DatasetStatusList {
+  provenance: Provenance | null;
+  datasets: DatasetStatus[];
+  semantics: string;
+}

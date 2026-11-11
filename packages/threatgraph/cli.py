@@ -151,6 +151,25 @@ def cmd_export(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_verify_raw(args: argparse.Namespace) -> None:
+    from threatgraph.data.integrity import integrity_report_path, verify_raw
+
+    cfg = _dataset(args.dataset)
+    _check_raw(cfg)
+    report = verify_raw(cfg, full=args.full, sha256=args.sha256)
+    _print(report)
+    print(f"\nwritten to {integrity_report_path(cfg)}", file=sys.stderr)
+    if not report["ok"]:
+        sys.exit(1)
+
+
+def cmd_status(_: argparse.Namespace) -> None:
+    from threatgraph.serving.datasets import dataset_status_list
+
+    for d in dataset_status_list(load_models_config()).datasets:
+        print(f"{d.dataset:<12} {d.mode_label:<34} {d.status:<14} {d.status_detail}")
+
+
 def cmd_all(args: argparse.Namespace) -> None:
     if args.dataset == "demo" and not _dataset("demo").raw_file("auth").exists():
         cmd_generate(argparse.Namespace(seed=args.seed))
@@ -164,6 +183,13 @@ def build_parser() -> argparse.ArgumentParser:
     g = sub.add_parser("generate", help="write the deterministic synthetic fixture")
     g.add_argument("--seed", type=int, default=42)
     g.set_defaults(fn=cmd_generate)
+    st = sub.add_parser("status", help="show which datasets are pending, stale or evaluated")
+    st.set_defaults(fn=cmd_status)
+    v = sub.add_parser("verify-raw", help="check raw source files before ingesting them")
+    v.add_argument("--dataset", default="lanl")
+    v.add_argument("--full", action="store_true", help="stream the whole file (slow on LANL)")
+    v.add_argument("--sha256", action="store_true", help="hash and compare with last run")
+    v.set_defaults(fn=cmd_verify_raw)
     for name, fn, help_ in (
         ("ingest", cmd_ingest, "parse raw files into Parquet + data-quality report"),
         ("features", cmd_features, "build causal window features"),

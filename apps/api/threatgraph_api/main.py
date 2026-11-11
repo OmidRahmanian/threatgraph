@@ -27,6 +27,7 @@ from threatgraph.config import load_dataset_config, load_models_config
 from threatgraph.pipeline import MissingInputError
 from threatgraph.provenance import PIPELINE_VERSION
 from threatgraph.serving import schemas as S
+from threatgraph.serving.datasets import dataset_status_list
 from threatgraph.serving.payloads import NotFoundError, ServingContext
 
 log = logging.getLogger("threatgraph.api")
@@ -150,6 +151,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             mode=cfg.mode,  # type: ignore[attr-defined]
             detail=None if ok else "artifacts not built",
         )
+
+    @app.get("/api/v1/datasets", response_model=S.DatasetStatusList)
+    def datasets() -> S.DatasetStatusList:
+        alt = settings.datasets_config
+        c = state.get("ctx")
+        prov = c.provenance if isinstance(c, ServingContext) else None
+        return dataset_status_list(load_models_config(), PathLib(alt) if alt else None, prov)
 
     @app.get("/api/v1/metadata", response_model=S.Metadata)
     def metadata() -> S.Metadata:
