@@ -338,7 +338,7 @@ function EdgeTable({
                 <td className="px-3 py-1.5">{g.hop}</td>
                 <td className="px-3 py-1.5 text-right">{int(g.nEvents)}</td>
                 <td className="px-3 py-1.5 text-right">{g.nFail}</td>
-                <td className="px-3 py-1.5 text-right">{g.knownRedteam || "—"}</td>
+                <td className="px-3 py-1.5 text-right">{g.knownRedteam}</td>
                 <td className="px-3 py-1.5">{relTime(g.first)}</td>
               </tr>
             ))}

@@ -89,7 +89,7 @@ export function DriftPanel({ models }: { models: ModelInfo[] }) {
     const b = psiBucket(v, d.thresholds);
     return (
       <td key={key} className="border border-line px-1 py-0.5 text-right" style={{ background: b.fill }} title={`PSI ${v === null ? "n/a" : v.toFixed(3)} (${b.label})`}>
-        {v === null ? "—" : v.toFixed(2)}
+        {v === null ? "N/A" : v.toFixed(2)}
       </td>
     );
   };

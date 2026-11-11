@@ -9,7 +9,7 @@ test("overview shows computed stats with a synthetic badge", async ({ page }) =>
   const summary = read("summary.json");
   await page.goto("/threatgraph/");
   await expect(page.getByTestId("provenance-badge").first()).toHaveText("Synthetic demo");
-  await expect(page.getByText("Synthetic demo — no real network data on this page")).toBeVisible();
+  await expect(page.getByText("Synthetic demo: no real network data on this page")).toBeVisible();
   await expect(page.getByTestId("stat-events")).toContainText(`${summary.rejected_source_rows} malformed rows rejected`);
   // Every section in the navigation is a working link.
   const nav = page.getByRole("navigation", { name: "ThreatGraph sections" });

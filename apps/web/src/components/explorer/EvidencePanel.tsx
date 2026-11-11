@@ -52,7 +52,7 @@ function AccountEdge({ e, onEntity }: { e: GraphEdge; onEntity: (id: string) => 
       <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
         <Fact k="Events" v={int(e.n_events)} />
         <Fact k="Success / failed" v={`${e.n_success} / ${e.n_fail}`} />
-        <Fact k="Auth types" v={e.auth_types.join(", ") || "—"} />
+        <Fact k="Auth types" v={e.auth_types.join(", ") || "Unknown"} />
         <Fact k="Pair first observed" v={relTime(e.edge_first_seen_seconds)} />
       </dl>
       <table className="mt-3 w-full text-left text-xs tabular-nums" data-testid="edge-events">
@@ -72,9 +72,9 @@ function AccountEdge({ e, onEntity }: { e: GraphEdge; onEntity: (id: string) => 
             <tr key={ev.event_id} className="border-t border-line">
               <td className="py-1 pr-2">{relTime(ev.event_time_seconds)}</td>
               <td className="py-1 pr-2">
-                {[ev.auth_type, ev.logon_type, ev.auth_orientation].filter(Boolean).join(" · ") || "—"}
+                {[ev.auth_type, ev.logon_type, ev.auth_orientation].filter(Boolean).join(" · ") || "Unknown"}
               </td>
-              <td className="py-1 pr-2">{ev.outcome ?? "—"}</td>
+              <td className="py-1 pr-2">{ev.outcome ?? "Unknown"}</td>
               <td className="py-1">{ev.known_redteam ? <KnownRedteamBadge /> : <UnlabeledBadge />}</td>
             </tr>
           ))}
@@ -220,7 +220,7 @@ function EntityView({
                   </button>
                 </td>
                 <td className="py-1 text-right">{int(l.n_events)}</td>
-                <td className="py-1 text-right">{l.n_known_redteam || "—"}</td>
+                <td className="py-1 text-right">{l.n_known_redteam}</td>
                 <td className="py-1 pl-3">
                   {relTime(l.first_seen_seconds)} → {relTime(l.last_seen_seconds)}
                 </td>

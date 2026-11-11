@@ -216,9 +216,9 @@ function ResearchSection({ models }: { models: ModelList }) {
       <Prose>
         <p>
           <strong className="text-ink">Confidence intervals.</strong> Windows of one account are correlated and red-team labels come in
-          per-account runs, so the bootstrap resamples whole accounts ({boot ? `${boot.n_boot} resamples, seed ${boot.seed}` : "—"}).
+          per-account runs, so the bootstrap resamples whole accounts ({boot ? `${boot.n_boot} resamples, seed ${boot.seed}` : "N/A"}).
           Model differences are paired: every model is scored on the same resample. Resamples with no positive account cannot
-          estimate AP and are dropped for that metric; the share kept is stored. With {boot?.n_positive_accounts ?? "—"} positive
+          estimate AP and are dropped for that metric; the share kept is stored. With {boot?.n_positive_accounts ?? "N/A"} positive
           accounts in the test split, intervals are wide, and that is the honest result.
         </p>
         <p>
@@ -324,8 +324,8 @@ function ReproSection({ bench, models }: { bench: Benchmarks; models: ModelList 
               {stages.map(([name, s]) => (
                 <tr key={name} className="border-t border-line">
                   <td className="py-1 pr-3">{name}</td>
-                  <td className="py-1 pr-3 text-right">{String(s.seconds ?? "—")}</td>
-                  <td className="py-1 text-right">{String(s.peak_rss_mb ?? "—")}</td>
+                  <td className="py-1 pr-3 text-right">{String(s.seconds ?? "N/A")}</td>
+                  <td className="py-1 text-right">{String(s.peak_rss_mb ?? "N/A")}</td>
                 </tr>
               ))}
             </tbody>

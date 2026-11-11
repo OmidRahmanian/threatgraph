@@ -56,7 +56,7 @@ FEATURE_DESCRIPTIONS: dict[str, str] = {
     "max_burst": "Maximum events in any burst sub-window (default 5 minutes) of the window",
     "z_events": "Deviation of n_events from the principal's trailing baseline (prior windows)",
     "z_distinct_dst": "Deviation of fan-out from the principal's trailing baseline",
-    "log_prior_windows": "log(1 + number of earlier active windows) — history / cold start",
+    "log_prior_windows": "log(1 + number of earlier active windows): history / cold start",
     "n_rare_dst": "Destinations in the window that no other account had authenticated to before",
     "n_pivot_src": "Source computers the account had itself reached as a remote destination "
     "shortly before (two-hop path)",

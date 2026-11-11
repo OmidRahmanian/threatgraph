@@ -512,8 +512,8 @@ function AccountTable({
                     {a.label}
                   </button>
                 </td>
-                <td className="px-3 py-1.5 text-right">{a.alerts || "—"}</td>
-                <td className="px-3 py-1.5 text-right">{a.redteamWindows || "—"}</td>
+                <td className="px-3 py-1.5 text-right">{a.alerts}</td>
+                <td className="px-3 py-1.5 text-right">{a.redteamWindows}</td>
                 <td className="px-3 py-1.5 text-right">{a.degree}</td>
                 <td className="px-3 py-1.5 text-right">{int(a.events)}</td>
               </tr>

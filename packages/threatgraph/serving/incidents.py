@@ -319,7 +319,7 @@ def writeups_markdown(builder: IncidentBuilder, scope: str = "evaluated") -> str
     """All write-ups of `scope` as one Markdown document (static download and report)."""
     prov = builder.ctx.provenance
     out = [
-        f"# Incident write-ups — {prov.dataset} ({prov.mode_label})",
+        f"# Incident write-ups: {prov.dataset} ({prov.mode_label})",
         "",
         "Generated from pipeline outputs by threatgraph.serving.incidents; do not edit by hand.",
         "",

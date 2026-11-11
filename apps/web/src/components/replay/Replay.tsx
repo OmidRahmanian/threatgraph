@@ -281,7 +281,7 @@ function Timeline({ inc, t, step, modelIds, names }: { inc: Incident; t: number;
               if (w.window_end > t) return null;
               const sc = w.scores[m];
               const shown = alertVisible(w, m, t);
-              const label = `${names[m]} · window ${relTime(w.window_start)}: score ${fmtScore(sc.score)} vs threshold ${fmtScore(sc.threshold)}${shown ? " — alert" : ""}`;
+              const label = `${names[m]} · window ${relTime(w.window_start)}: score ${fmtScore(sc.score)} vs threshold ${fmtScore(sc.threshold)}${shown ? ", alert" : ""}`;
               return (
                 <g key={`${m}-${w.window_id}`} onMouseEnter={() => setTip(label)} onMouseLeave={() => setTip(null)} data-testid={shown ? `alert-${m}` : undefined}>
                   <title>{label}</title>
@@ -431,7 +431,7 @@ function EventLog({ inc, step }: { inc: Incident; step: number }) {
                 {e.src_computer ?? "?"} → {e.dst_computer ?? "?"}
               </td>
               <td className="py-1 pr-2">{[e.auth_type, e.auth_orientation].filter(Boolean).join(" · ")}</td>
-              <td className="py-1 pr-2">{e.outcome ?? "—"}</td>
+              <td className="py-1 pr-2">{e.outcome ?? "Unknown"}</td>
               <td className="whitespace-nowrap py-1">{e.known_redteam ? <KnownRedteamBadge /> : <UnlabeledBadge />}</td>
             </tr>
           ))}
@@ -486,7 +486,7 @@ function WindowTable({ inc, t, modelIds, names }: { inc: Incident; t: number; mo
                     Graph →
                   </Link>
                 ) : (
-                  <span className="text-ink-3">—</span>
+                  <span className="text-ink-3">Not available</span>
                 )}
               </td>
             </tr>

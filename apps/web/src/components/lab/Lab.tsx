@@ -50,7 +50,7 @@ export function Lab() {
           <ProvenanceBadge provenance={models.provenance} />
         </div>
         <p className="max-w-3xl text-sm leading-relaxed text-ink-2">
-          Every number here is recomputed in your browser from the persisted held-out score table of the selected model — nothing
+          Every number here is recomputed in your browser from the persisted held-out score table of the selected model. Nothing
           is retrained and nothing is typed in by hand. Scores rank how unusual an account-hour is; they are not probabilities of
           compromise.
         </p>
@@ -137,8 +137,8 @@ function ComparisonTable({ models: list }: { models: ModelList }) {
       </table>
       <p className="mt-2 text-xs text-ink-3">
         n/e = not estimable (no known positives). Brackets are {Math.round((boot?.level ?? 0.95) * 100)}% intervals from an account
-        cluster bootstrap ({boot ? int(boot.n_boot) : "—"} resamples of whole accounts). The test split has only{" "}
-        {boot?.n_positive_accounts ?? "—"} accounts with known red-team activity, so the intervals are wide: treat differences
+        cluster bootstrap ({boot ? int(boot.n_boot) : "N/A"} resamples of whole accounts). The test split has only{" "}
+        {boot?.n_positive_accounts ?? "N/A"} accounts with known red-team activity, so the intervals are wide: treat differences
         between models as indicative.
       </p>
     </div>
@@ -210,7 +210,7 @@ function ModelWorkspace({ model, meta }: { model: ModelInfo; meta: Metadata }) {
       <div className="flex flex-wrap items-center gap-3">
         <Segmented label="Evaluation split" value={split} onChange={setSplit} options={SPLITS} />
         {split === "validation" ? (
-          <span className="text-xs text-ink-3">The threshold was calibrated on this split — treat its numbers as optimistic.</span>
+          <span className="text-xs text-ink-3">The threshold was calibrated on this split. Treat its numbers as optimistic.</span>
         ) : null}
       </div>
       {data.status === "loading" ? <LoadingBlock label="Loading held-out scores…" /> : null}
@@ -447,7 +447,7 @@ function ModelCard({ model, meta, metrics }: { model: ModelInfo; meta: Metadata;
   const rows: [string, React.ReactNode][] = [
     ["Model", `${model.display_name} (${model.kind})`],
     ["What it does", model.description],
-    ["Dataset", `${metrics.provenance.dataset} — ${metrics.provenance.mode_label}`],
+    ["Dataset", `${metrics.provenance.dataset}: ${metrics.provenance.mode_label}`],
     ["Scoring unit", meta.scoring_unit],
     [
       "Chronological split",
@@ -456,7 +456,7 @@ function ModelCard({ model, meta, metrics }: { model: ModelInfo; meta: Metadata;
         .join(" · "),
     ],
     ["Training", `${int(Number(t.n_train_rows))} train windows · labels used: ${t.labels_used ? "yes" : "no"} · ${Number(t.train_seconds).toFixed(3)} s · seed ${String(t.seed)}`],
-    ["Threshold", `${fmtScore(model.threshold)} — ${String(model.threshold_policy.type)} (alert rate ${String(model.threshold_policy.alert_rate)}) on ${String(model.threshold_policy.calibrated_on)}`],
+    ["Threshold", `${fmtScore(model.threshold)}: ${String(model.threshold_policy.type)} (alert rate ${String(model.threshold_policy.alert_rate)}) on ${String(model.threshold_policy.calibrated_on)}`],
     ["Inference", `${Number(t.score_ms_per_1000_windows).toFixed(2)} ms per 1,000 windows (single process)`],
     ["Features", model.features.join(", ")],
     ["Hyperparameters", JSON.stringify(model.hyperparameters)],

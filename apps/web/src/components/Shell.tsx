@@ -89,7 +89,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               Config {provenance.config_hash} · pipeline {provenance.pipeline_version}
             </span>
           ) : null}
-          <span>Historical/synthetic research data — not live threat intelligence or live traffic.</span>
+          <span>Historical/synthetic research data. Not live threat intelligence or live traffic.</span>
         </div>
       </footer>
     </div>

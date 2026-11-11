@@ -64,7 +64,7 @@ def model_card_md(ctx: ServingContext, m: S.ModelInfo) -> str:
     bounds = ctx.metrics["split_boundaries_seconds"]
     fmt = lambda v: "n/e" if v is None else f"{v:.3f}"  # noqa: E731
     lines = [
-        f"# Model card — {m.display_name}",
+        f"# Model card: {m.display_name}",
         "",
         f"_{_header(ctx.provenance)}. Generated from artifacts; do not edit by hand._",
         "",

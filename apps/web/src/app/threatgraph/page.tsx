@@ -22,7 +22,7 @@ export default function OverviewPage() {
       <section className="max-w-3xl">
         <p className="text-sm font-medium text-ink-3">Security data science · portfolio project</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
-          Which logins look like lateral movement — and how sure can we be?
+          Which logins look like lateral movement, and how sure can we be?
         </h1>
         <p className="mt-4 text-base leading-relaxed text-ink-2">
           ThreatGraph AI scores hourly authentication behavior per account, explains each alert with the

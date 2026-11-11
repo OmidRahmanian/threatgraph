@@ -12,11 +12,14 @@ alert threshold, see metrics recompute from the stored held-out scores, inspect 
 behind any alert, explore which computers an alerted account moved between, and replay
 documented red-team incidents against each model's alerts.
 
-> **Status: Phases 1, 3, 4 and 5 complete (Phase 5 where the data allows); Phase 2 ready but
-> not run on real data.** The demo runs on a **deterministic synthetic fixture** and is labeled
-> *Synthetic demo* everywhere. Real LANL mode is tested end to end on LANL-format data but has
-> **not** been run on the real files (they need LANL's data-use form), so no real-data
-> performance is claimed. See [What's implemented](#whats-implemented).
+> **Status: working synthetic demo with the authentication pipeline, model comparison,
+> network map, incident replay, methodology page, drift monitor and bootstrap confidence
+> intervals implemented.** The Docker stack has been verified locally, and Python/web CI
+> has passed on the published `main` branch. The demo runs on a **deterministic synthetic
+> fixture** and is labeled *Synthetic demo* everywhere. Real LANL mode is tested end to end
+> on LANL-format fixtures but has **not** been run on the official files. Additional log
+> sources, a trained supervised model and a GNN benchmark remain optional, unimplemented
+> extensions. See [What's implemented](#whats-implemented) for individual statuses.
 
 ## Quick start
 
@@ -95,15 +98,26 @@ Details, the real-data-mode guarantees and a scale rehearsal: [docs/real_data.md
 | Entity graph tables, bounded graph/entity API, graph features, M3 + M1-vs-M3 ablation | ✅ (ablation not blind on the demo) |
 | Network map: alerted and red-team accounts with their computers, zoom/pan, search, model and day filters, links to hours and incidents | ✅ |
 | Hour explorer: window list, directed graph, edge evidence, entity panel, table view | ✅ |
-| Incident API, replay page (alerts revealed at window end), generated write-ups | ✅ |
-| Methodology page, model cards (Markdown), comparison CSV, API latency in the site | ✅ |
-| Docker stack (read-only API + nginx) verified locally; CI Docker smoke-test job | ✅ |
-| Account cluster-bootstrap CIs, paired model differences, drift monitor, explanation deletion test | ✅ |
-| Supervised model (M2) | ⛔ gated: demo labels too few (decision recorded in metrics.json) |
-| Flows/DNS/process logs, GNN benchmark | ⏳ not built (need LANL download / see docs/modeling.md) |
-| Bounded-memory chunked features/graph, split suggestion, capped score tables, real-data-mode test, scale rehearsal | ✅ |
-| CI workflow (Python, web + e2e, Docker smoke test) | ✅ written · not yet run on GitHub |
-| Run on real LANL data | ⏳ pipeline ready, not yet run (needs your download) |
+| Incident API, replay page (alerts revealed at window end), generated write-ups | ✅ implemented and tested on the synthetic demo |
+| Methodology page, model cards (Markdown), comparison CSV, API latency in the site | ✅ implemented |
+| Dockerfile and Compose stack (read-only API + nginx) | ✅ implemented and verified locally; see [deployment notes](docs/deployment.md#docker) |
+| CI workflow: Python lint/types/tests, web build and browser tests | ✅ [passed on published `main`](https://github.com/OmidRahmanian/threatgraph/actions/runs/42347825810) |
+| Docker smoke-test CI job | ✅ configured on this branch; its GitHub run is pending |
+| Drift monitor (API and Experiment Lab) | ✅ implemented |
+| Account cluster-bootstrap confidence intervals and paired model differences | ✅ implemented |
+| Explanation faithfulness study (feature deletion test) | ✅ implemented |
+| Supervised-model label-availability gate | ✅ implemented; decision and reason recorded in metrics.json |
+| Trained supervised model (M2) | ⏳ optional, not implemented; the current demo has too few training labels |
+| Flows/DNS/process log ingestion and features | ⏳ optional, not implemented |
+| GNN benchmark | ⏳ optional, not implemented; see [modeling notes](docs/modeling.md) |
+| Chunked features/graph, split suggestion, capped score tables, real-data-mode test, scale rehearsal | ✅ implemented; real LANL memory use remains unverified |
+| Run on official LANL data | ⏳ importer implemented; actual evaluation awaits user-downloaded files |
+
+The linked CI run covers commit `ad6d4d8` on published `main`. It does not verify the newer
+replay, research extensions or Docker CI job on this branch; those need a run after publishing
+the current changes. Phase 4's replay and methodology features are implemented. Phase 5 is
+partially implemented, with its completed research features and optional extensions listed
+separately above.
 
 ## Architecture
 

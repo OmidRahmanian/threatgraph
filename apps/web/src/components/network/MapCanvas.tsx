@@ -153,7 +153,7 @@ export function MapCanvas({
     ...(c.knownRedteam ? [`${c.knownRedteam} known red-team event${c.knownRedteam === 1 ? "" : "s"} on mapped links`] : []),
   ];
   const linkLines = (l: LinkView) => [
-    `${label(l.account)} — ${label(l.computer)}`,
+    `${label(l.account)} · ${label(l.computer)}`,
     `${ROLE_TEXT[l.link.role]} · ${int(l.events)} events · ${l.fail} failed`,
     ...(l.alerted ? [`In a window flagged by ${modelName}`] : []),
     ...(l.knownRedteam ? [`${l.knownRedteam} known red-team event${l.knownRedteam === 1 ? "" : "s"}`] : []),

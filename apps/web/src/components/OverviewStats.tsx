@@ -23,7 +23,7 @@ export function OverviewStats() {
       </div>
 
       {p.is_synthetic ? (
-        <Callout title="Synthetic demo — no real network data on this page" tone="synthetic">
+        <Callout title="Synthetic demo: no real network data on this page" tone="synthetic">
           <p>
             Every number below is computed by the pipeline from a deterministic synthetic fixture in the
             exact LANL file format (seeded with lateral-movement campaigns, benign look-alikes, and
