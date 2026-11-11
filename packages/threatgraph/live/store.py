@@ -270,17 +270,18 @@ class LiveStore:
                 ],
             )
             accepted = c.total_changes - before
-            for e in events:
+            real = [e for e in events if not e.simulated]  # tests never mark an agent online
+            for e in real:
                 if e.kind == "agent.heartbeat":
                     heartbeat = {"ts": e.ts, **e.attrs}
-            if events:
+            if real:
                 c.execute(
                     "UPDATE agents SET last_seen = ?, last_heartbeat = COALESCE(?, last_heartbeat) "
                     "WHERE source_id = ?",
                     (
                         received_at,
                         json.dumps(heartbeat) if heartbeat else None,
-                        events[0].source_id,
+                        real[0].source_id,
                     ),
                 )
         return InsertResult(accepted=accepted, duplicates=len(events) - accepted)

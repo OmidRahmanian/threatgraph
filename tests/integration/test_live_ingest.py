@@ -95,7 +95,7 @@ def test_duplicate_batches_are_stored_once(env) -> None:
     again = post(client, tok["web1"], batch, gz=True).json()
     assert first["accepted"] == 20 and again == {**again, "accepted": 0, "duplicates": 20}
     assert store.scalar("SELECT count(*) FROM events") == 20
-    assert store.agents()[-1]["last_seen"] is not None or store.agents()[0]["last_seen"]
+    assert all(a["last_seen"] is None for a in store.agents())  # simulated: agent not "online"
 
 
 def test_invalid_events_rejected_with_reasons(env) -> None:
@@ -126,7 +126,8 @@ def test_size_batch_and_rate_limits(env) -> None:
 
 def test_heartbeat_updates_agent_health(env) -> None:
     store, client, tok = env
-    hb = ev(i=5, kind="agent.heartbeat", attrs={"version": "0.1.0", "buffered": 3})
+    # A test heartbeat marked as real telemetry; simulated events never mark an agent online.
+    hb = ev(i=5, kind="agent.heartbeat", attrs={"version": "0.1.0", "buffered": 3}, simulated=False)
     post(client, tok["web1"], {"source_id": "web1", "events": [hb]})
     (a,) = [x for x in store.agents() if x["source_id"] == "web1"]
     assert a["last_heartbeat"]["buffered"] == 3
