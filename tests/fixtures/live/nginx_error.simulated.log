@@ -1,0 +1,4 @@
+2026/11/11 17:40:01 [error] 1234#1234: *57 open() "/var/www/html/.env" failed (2: No such file or directory), client: 198.51.100.7, server: example.test, request: "GET /.env HTTP/1.1", host: "example.test"
+2026/11/11 17:40:02 [error] 1234#1234: *58 connect() failed (111: Connection refused) while connecting to upstream, client: 192.0.2.10, server: example.test, request: "GET /api/items HTTP/1.1", upstream: "http://127.0.0.1:3000/api/items", host: "example.test"
+2026/11/11 17:40:03 [alert] 1200#1200: worker process 1234 exited on signal 11 (core dumped)
+garbage line

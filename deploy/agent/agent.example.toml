@@ -1,0 +1,76 @@
+# ThreatGraph collector agent configuration (copy to /etc/threatgraph-agent/agent.toml).
+# Every collector is optional: delete or disable what this server does not run.
+# Guide: docs/live/collector.md
+
+# Unique name for this host: 1-64 characters from [A-Za-z0-9._-].
+source_id = "web1"
+
+# Ingestion endpoint. Prefer a private network address (WireGuard/Tailscale) with TLS.
+# Plain http:// is refused unless the server is on loopback AND allow_insecure_http = true.
+server_url = "https://10.8.0.1:8443"
+# A private CA (for a self-signed ingestion certificate on a private network). Optional.
+# ca_file = "/etc/threatgraph-agent/ca.pem"
+
+# The agent token: the TG_AGENT_TOKEN environment variable wins, then token_file.
+# Never put the token itself in a world-readable file.
+token_file = "/etc/threatgraph-agent/token"
+
+state_dir = "/var/lib/threatgraph-agent"
+# Time zone for log lines that carry no zone (traditional syslog, nginx error.log).
+log_timezone = "UTC"
+
+batch_max_events = 500
+flush_interval_seconds = 5
+buffer_max_events = 20000
+http_timeout_seconds = 10
+heartbeat_interval_seconds = 60
+# true: begin at the end of existing logs on first start (no historical backfill).
+start_at_end = true
+
+[privacy]
+# keep | truncate (/24 or /48 network) | hash (keyed; needs ip_hash_key_file)
+ip_mode = "keep"
+# ip_hash_key_file = "/etc/threatgraph-agent/ip_hash_key"
+# Query strings often carry tokens; they are dropped unless this is true (then redacted).
+keep_query = false
+
+[[logs]]
+type = "nginx_access"          # nginx_access | nginx_error | auth | syslog
+path = "/var/log/nginx/access.log"
+service = "website"
+
+[[logs]]
+type = "nginx_error"
+path = "/var/log/nginx/error.log"
+service = "website"
+
+[[logs]]
+type = "auth"                  # /var/log/secure on RHEL-family systems
+path = "/var/log/auth.log"
+
+[[logs]]
+type = "syslog"                # OOM kills, segfaults, systemd unit failures
+path = "/var/log/syslog"
+
+[metrics]
+enabled = true
+interval_seconds = 60
+disk_paths = ["/"]
+
+[systemd]
+enabled = true
+interval_seconds = 60
+units = []                     # empty: report every failed unit
+
+[docker]
+# Docker socket access is equivalent to root. Prefer a read-only socket proxy
+# (docs/live/collector.md) and point `socket` at it.
+enabled = false
+socket = "/var/run/docker.sock"
+interval_seconds = 60
+
+[fim]
+# File integrity: SHA-256 of these files (directories: up to 2,000 files).
+enabled = true
+interval_seconds = 300
+paths = ["/etc/ssh/sshd_config", "/etc/sudoers", "/etc/passwd", "/etc/group", "/etc/nginx/nginx.conf"]

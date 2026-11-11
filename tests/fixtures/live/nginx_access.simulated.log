@@ -1,0 +1,9 @@
+192.0.2.10 - - [11/Nov/2026:17:40:01 +0000] "GET /index.html HTTP/1.1" 200 5120 "-" "Mozilla/5.0 (simulated)"
+192.0.2.10 - - [11/Nov/2026:17:40:02 +0000] "GET /blog/post?id=7&token=abc123secret HTTP/1.1" 200 812 "https://example.test/" "Mozilla/5.0 (simulated)" 0.012 0.010
+198.51.100.7 - - [11/Nov/2026:12:40:03 -0500] "GET /.env HTTP/1.1" 404 153 "-" "curl/8.0 (simulated)"
+198.51.100.7 - alice [11/Nov/2026:17:40:04 +0000] "POST /wp-login.php HTTP/1.1" 404 153 "-" "-" 0.001 -
+203.0.113.5 - - [11/Nov/2026:17:40:05 +0000] "\x16\x03\x01\x00\xa5\x01\x00" 400 157 "-" "-"
+203.0.113.5 - - [11/Nov/2026:17:40:06 +0000] "-" 400 0 "-" "-"
+2001:db8::1 - - [11/Nov/2026:17:40:07 +0000] "GET /api/health HTTP/2.0" 502 166 "-" "probe (simulated)" 0.300 0.150, 0.150
+this is not an nginx line
+192.0.2.10 - - [99/Nov/2026:17:40:01 +0000] "GET / HTTP/1.1" 200 1 "-" "-"

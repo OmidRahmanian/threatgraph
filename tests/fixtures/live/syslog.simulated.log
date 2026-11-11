@@ -1,0 +1,5 @@
+Nov 11 17:41:00 web1 kernel: [123456.789012] Out of memory: Killed process 4321 (python3) total-vm:2048000kB, anon-rss:1024000kB
+Nov 11 17:41:01 web1 kernel: [123457.000000] app[4400]: segfault at 0 ip 00007f sp 00007ffd error 4 in libc.so.6
+Nov 11 17:41:02 web1 systemd[1]: myapp.service: Main process exited, code=exited, status=1/FAILURE
+Nov 11 17:41:03 web1 systemd[1]: myapp.service: Failed with result 'exit-code'.
+Nov 11 17:41:04 web1 systemd[1]: Started Daily apt download activities.
