@@ -1,5 +1,7 @@
 # ThreatGraph AI
 
+[![CI](https://github.com/OmidRahmanian/threatgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/OmidRahmanian/threatgraph/actions/workflows/ci.yml)
+
 Explainable behavioral anomaly detection on authentication logs, with a rigorous evaluation
 lab, an interactive website, and a live monitoring mode for your own servers.
 
@@ -123,8 +125,8 @@ Details, the real-data-mode guarantees and a scale rehearsal: [docs/real_data.md
 | Incident API, replay page (alerts revealed at window end), generated write-ups | ✅ implemented and tested on the synthetic demo |
 | Methodology page, model cards (Markdown), comparison CSV, API latency in the site | ✅ implemented |
 | Dockerfile and Compose stack (read-only API + nginx) | ✅ implemented and verified locally; see [deployment notes](docs/deployment.md#docker) |
-| CI workflow: Python lint/types/tests, web build and browser tests | ✅ [passed on published `main`](https://github.com/OmidRahmanian/threatgraph/actions/runs/42347825810) |
-| Docker smoke-test CI job | ✅ configured on this branch; its GitHub run is pending |
+| CI workflow: Python lint/types/tests, web build and browser tests | ✅ runs on every push to `main` and every pull request (badge above) |
+| Docker smoke-test CI job (research stack and live-monitoring stack) | ✅ in the CI workflow; first GitHub run pending |
 | Drift monitor (API and Experiment Lab) | ✅ implemented |
 | Account cluster-bootstrap confidence intervals and paired model differences | ✅ implemented |
 | Explanation faithfulness study (feature deletion test) | ✅ implemented |
@@ -146,11 +148,10 @@ Details, the real-data-mode guarantees and a scale rehearsal: [docs/real_data.md
 | **Live:** private dashboard `/threatgraph/live` (sign-in, health, availability, traffic, incidents, timeline) | ✅ checked in a browser on desktop and mobile |
 | **Live:** Compose `live` profile, Caddy TLS, hardened containers, agent systemd unit, backups | ✅ verified locally (colima); not deployed to a VPS |
 
-The linked CI run covers commit `ad6d4d8` on published `main`. It does not verify the newer
-replay, research extensions or Docker CI job on this branch; those need a run after publishing
-the current changes. Phase 4's replay and methodology features are implemented. Phase 5 is
-partially implemented, with its completed research features and optional extensions listed
-separately above.
+Phases 1 to 4 are complete. Phase 5 is complete where the data allows; its optional
+extensions (supervised model, flows/DNS/process logs, GNN) are listed above as not
+implemented. The real LANL evaluation stays pending until the official files are downloaded
+through LANL's form and the pipeline is run on them.
 
 ## Architecture
 
