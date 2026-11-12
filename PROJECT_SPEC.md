@@ -21,6 +21,10 @@ depth, statistically rigorous evaluation, and honest presentation.
 6. LANL data is user-downloaded via LANL's form, never committed, baked into images, or
    published raw.
 7. Core analysis works offline with no LLM and no paid service.
+8. Research and live data never mix. Live telemetry is private (authenticated, never in the
+   static export); simulated live events are labeled and never notify real recipients.
+9. Live detection and alerting are deterministic and work without the model or the LLM; the
+   LLM cannot take actions and must cite supplied evidence.
 
 ## Phases
 
@@ -32,6 +36,8 @@ depth, statistically rigorous evaluation, and honest presentation.
 | 3 | Entity graph, graph/novelty features, explorer, bounded graph API, graph-feature ablation | **Done** on the synthetic demo (`docs/graph.md`), including a whole-split network map with search, zoom/pan and day filters |
 | 4 | Evidence-linked replay, model cards, incident write-ups, methodology page, deployment | **Done**: incident API and replay page, generated write-ups, model cards (Lab and Markdown), comparison CSV, methodology page with benchmarks, CI with a Docker smoke-test job, Docker stack verified locally |
 | 5 | Flows/DNS/proc, drift monitor, block-bootstrap CIs, supervised model, GNN, explainability study | **Done where the data allows**: account cluster-bootstrap CIs (with paired model differences), drift monitor (API, Lab), explanation deletion test, supervised-model label gate (demo labels do not permit one). **Not built**: flows/DNS/proc (need user download; no fixture) and GNN (see docs/modeling.md) |
+| 6 | Real-data readiness: raw-file integrity check, `lanl_smoke` window, dataset status (pending vs evaluated) in API, export and Lab | **Done**; the LANL run itself still awaits the user's download |
+| 7 | Live Monitoring Mode: agent, authenticated ingestion, SQLite store, rules, incidents, behavioural model, Telegram/SMTP notifications, external probe, optional LLM investigation, private dashboard, Compose deployment | **Done and tested** with simulated data and local stand-ins, and run locally with a real nginx container; **not deployed** to the user's VPS |
 
 ## API contract (v1)
 
@@ -39,7 +45,12 @@ Implemented: `health`, `metadata`, `summary`, `models`, `models/{id}/metrics`,
 `models/{id}/scores`, `models/{id}/predictions`, `models/{id}/explanations/{window_id}`,
 `events`, `benchmarks`, `graph`, `graph/windows`, `graph/windows/{window_id}`,
 `entities/{entity_id}`, `network`, `incidents`, `incidents/{incident_id}`.
-`drift`. No planned routes remain unregistered.
+`drift`, `datasets`. No planned routes remain unregistered.
+
+Live (private, separate apps): ingestion `POST /ingest/v1/events` (agent token); dashboard
+`/live-api/v1/{health, auth/login, auth/logout, auth/me, overview, incidents, incidents/{id},
+incidents/{id}/ack, incidents/{id}/resolve, incidents/{id}/investigate, events, model}`
+(session; state changes need `X-TG-Request: 1`).
 
 ## Deviations from the suggested layout
 

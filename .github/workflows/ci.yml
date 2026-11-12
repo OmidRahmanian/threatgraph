@@ -76,5 +76,17 @@ jobs:
           curl -sf localhost:8080/threatgraph/replay/ > /dev/null
           curl -sf localhost:8080/threatgraph-data/demo/v1/incidents/index.json > /dev/null
           ! docker compose exec -T api ls /app/data/raw 2>/dev/null
+      - name: Start the live monitoring profile (no secrets; dashboard login stays disabled)
+        run: docker compose --profile live up -d --build --wait
+      - name: Live smoke test (authentication required everywhere)
+        run: |
+          curl -skf https://localhost/live-api/v1/health | grep '"status":"ok"'
+          test "$(curl -sk -o /dev/null -w '%{http_code}' https://localhost/live-api/v1/overview)" = 401
+          test "$(curl -sk -o /dev/null -w '%{http_code}' -X POST https://localhost/ingest/v1/events)" = 404
+          curl -skf https://localhost:8443/ingest/v1/health | grep '"status":"ok"'
+          test "$(curl -sk -o /dev/null -w '%{http_code}' -X POST https://localhost:8443/ingest/v1/events -d '{}')" = 401
+          curl -skf https://localhost/api/v1/health > /dev/null
+          curl -skf https://localhost/threatgraph/live/ > /dev/null
+          docker compose --profile live exec -T live-worker threatgraph-live worker --once > /dev/null
       - if: always()
-        run: docker compose logs && docker compose down
+        run: docker compose --profile live logs && docker compose --profile live down -v

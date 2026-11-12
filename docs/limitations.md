@@ -48,3 +48,31 @@
     after seeing results.
 18. **Faithfulness test baseline.** The deletion test resets features to training medians; a
     different baseline (for example a per-account median) could rank explanations differently.
+
+## Live Monitoring Mode
+
+19. **Not yet run on your VPS.** Every component is tested with simulated events and local
+    stand-ins, and the stack was run locally with a real nginx container. Real SSH logs, your
+    traffic, real Telegram/SMTP delivery and the GitHub Actions probe are unverified until you
+    deploy them.
+20. **Thresholds are starting values.** They are not fitted to your traffic. Expect to tune
+    them; the false-alert rate is unknown until incidents are resolved with verdicts.
+21. **Single host, single writer.** SQLite and in-process rate limits suit one VPS and a few
+    agents. Several busy hosts need the storage interface backed by a server database.
+22. **Detection depends on telemetry.** When an agent is offline, every rule for that host is
+    blind (the `agent_offline` incident says so). Events that arrive later than the detection
+    lookback are stored but not evaluated by event rules.
+23. **Log-based security monitoring only.** No network traffic inspection, no process
+    auditing (auditd/eBPF), no journald reader. An attacker with root can alter logs and stop
+    the agent; the offline incident and the external probe are the only signals then.
+24. **Rotation edge case.** If the agent is down across two log rotations and old logs are
+    compressed, lines in between are not read.
+25. **Privacy trade-offs.** IP truncation or hashing weakens per-source rules (all of a /24
+    becomes one source). `sudo` command lines are kept (with secrets redacted) as evidence.
+26. **The model is unsupervised** and new legitimate clients look unusual by construction;
+    its findings are informational.
+27. **The LLM note is advisory** and can be wrong even with citations enforced; it may also
+    miss injection attempts that do not match the flagging patterns (they still cannot cause
+    any action).
+28. **Authentication is single-user**: one admin account, no multi-factor authentication. Put
+    the dashboard behind your VPN as well if that is a concern.

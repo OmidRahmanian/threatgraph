@@ -9,6 +9,20 @@ data. No real-data result exists until you run the steps below.
 1. Complete LANL's form at <https://csr.lanl.gov/data/cyber1/> and download `auth.txt.gz`
    (~7 GB compressed, ~1.05 billion events over 58 days) and `redteam.txt.gz`.
 2. Put both in `data/raw/lanl/`. The path is git-ignored and excluded from Docker builds.
+   Check them before ingesting:
+
+   ```bash
+   python scripts/verify_lanl.py                  # quick: first 10,000 rows of each file
+   python scripts/verify_lanl.py --full --sha256  # whole files: gzip complete, column counts,
+                                                  # integer and sorted time, hash vs last run
+   ```
+
+   The report goes to `data/processed/lanl/reports/source_integrity.json`. A changed hash
+   or unsorted time fails the check (unsorted files need `ingest.assume_sorted: false`).
+   Then try the pipeline on a small real window first:
+   `python scripts/run_pipeline.py --dataset lanl_smoke` (days 0 to 3). It measures
+   throughput, memory and data quality on real data; its detection metrics are not an
+   evaluation and are often not estimable.
 3. Choose the time window and split days:
 
    ```bash
@@ -37,6 +51,9 @@ data. No real-data result exists until you run the steps below.
    publishing it anywhere.
 
 If the files are missing, every command prints these instructions and the demo keeps working.
+`python -m threatgraph.cli status` and the Experiment Lab's "Research datasets" panel show
+each dataset as files missing, not processed, ingested, stale or evaluated; LANL results
+appear only once a fresh evaluation exists, and the panel reads "pending" until then.
 
 ## What changes in real-data mode
 

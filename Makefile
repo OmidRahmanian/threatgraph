@@ -1,7 +1,7 @@
 PY ?= .venv/bin/python
 DATASET ?= demo
 
-.PHONY: setup demo pipeline api web web-build test lint typecheck e2e benchmark docker ci clean
+.PHONY: setup demo pipeline api web web-build test lint typecheck e2e benchmark docker live ci clean
 
 setup:            ## Create the Python venv and install web dependencies
 	uv venv --python 3.12 .venv
@@ -44,6 +44,10 @@ benchmark:        ## API latency report, then re-export so the site shows it
 
 docker: web-build  ## API + nginx in containers (run `make demo` first); ports via TG_API_PORT/TG_WEB_PORT
 	docker compose up --build
+
+live:             ## Live Monitoring Mode stack (docs/deployment.md#live-monitoring)
+	cd apps/web && NEXT_PUBLIC_TG_LIVE_API_BASE=/live-api/v1 npm run build
+	docker compose --profile live up -d --build
 
 ci: lint typecheck test e2e
 

@@ -65,3 +65,82 @@ docker compose up --build        # or `docker-compose up --build`; or `make dock
 Never deploy raw LANL files or `data/processed/lanl` publicly. Export with the default
 `public_ids=True`, which replaces identifiers with salted aliases (the salt stays in
 `data/processed/<ds>/.export_salt`), and review the bundle before publishing.
+
+## Live monitoring
+
+Live Monitoring Mode adds private services to the same Compose file under the `live` profile.
+The research services (`api`, `web`) are unchanged. Guides: [docs/live/](live/README.md).
+Nothing here is applied to a server automatically: every step below is run by you.
+
+### Services
+
+| Service | Role | Exposure |
+|---|---|---|
+| `caddy` | TLS (automatic HTTPS), security headers; serves the static site, `/api` (research, read-only) and `/live-api` (private dashboard API) on one origin | ports 80/443 |
+| `live-ingest` | agent and probe ingestion | only through Caddy's second site on port 8443, bound to `TG_INGEST_BIND` (a private address) |
+| `live-dashboard` | authenticated dashboard API | only through Caddy (`/live-api`) |
+| `live-worker` | probes, rules, model, incidents, notifications, retention | none |
+| `ollama` (`llm` profile) | optional local model | none |
+
+Every live container runs as a non-root user with a read-only root filesystem, all
+capabilities dropped (Caddy gets back only `NET_BIND_SERVICE`), `no-new-privileges`,
+memory and CPU limits, a health check, `restart: unless-stopped`, and size-capped JSON logs
+(3 × 10 MB). No container is privileged and none mounts the Docker socket.
+
+### First deployment on a VPS
+
+```bash
+git clone https://github.com/OmidRahmanian/threatgraph && cd threatgraph
+# 1. Website build with the live page enabled (same origin as the dashboard API).
+make setup && make demo
+(cd apps/web && NEXT_PUBLIC_TG_LIVE_API_BASE=/live-api/v1 npm run build)
+# 2. Secrets (never committed): compose variables in .env, service secrets in .env.live.
+docker compose --profile live run --rm live-worker threatgraph-live hash-password
+#    → in .env.live: TG_LIVE_ADMIN_USER=you and TG_LIVE_ADMIN_PASSWORD_HASH='scrypt$...'
+#      (single quotes keep the $ signs), plus the Telegram/SMTP secrets;
+#      in .env: TG_DOMAIN, TG_INGEST_ADDRESS, TG_INGEST_BIND (your WireGuard/Tailscale address)
+# 3. Start, register an agent, check notifications.
+docker compose --profile live up -d --build
+docker compose --profile live exec live-worker threatgraph-live agent add web1
+docker compose --profile live exec live-worker threatgraph-live notify-test
+```
+
+Then install the agent ([collector.md](live/collector.md)) and an external probe on another
+machine ([probe.md](live/probe.md)).
+
+Firewall: allow 80/443 publicly; allow 8443 only on the private interface; keep SSH as it is.
+
+After rebuilding the website, run `docker compose --profile live restart caddy`: the build
+replaces `apps/web/out` and a running container keeps the old directory.
+
+### Backup and recovery
+
+What to back up: the `live-data` volume (SQLite database and the trained model), `.env`,
+`.env.live` and `configs/live.yaml`. Caddy's volume holds certificates and can be recreated.
+
+```bash
+./deploy/backup.sh          # online, consistent copy → backups/live-<UTC time>.db.gz, 14 days kept
+```
+
+Schedule it daily (cron example in the script) and copy `backups/` off the server.
+
+Restore:
+
+```bash
+docker compose --profile live stop live-worker live-dashboard live-ingest
+gunzip -c backups/live-<stamp>.db.gz > /tmp/live.db
+docker compose --profile live run --rm -v /tmp/live.db:/restore.db:ro live-worker \
+  sh -c 'cp /restore.db /data/live.db && rm -f /data/live.db-wal /data/live.db-shm'
+docker compose --profile live up -d
+```
+
+The backup and the restore check (`PRAGMA integrity_check`, event and incident counts) were
+run against a local stack; restoring on a VPS has not been exercised yet. Agents keep their
+own positions and re-send anything unacknowledged, and the server ignores duplicates, so a
+restore loses at most the events written after the backup that agents had already delivered.
+
+### What stays private
+
+The public research site and API never contain live telemetry. The live page in a public
+build only states that live monitoring is not enabled. Live data is reachable only through
+`/live-api` after sign-in, with `Cache-Control: no-store`.

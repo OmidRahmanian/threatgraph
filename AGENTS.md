@@ -16,5 +16,13 @@
 - **Unbuilt features** are labeled as such in the UI (no dummy controls).
 - **API/static parity.** Add payloads in `packages/threatgraph/serving/payloads.py` and use them from
   both the API and the exporter; `tests/integration/test_end_to_end.py` checks parity.
+- **Live Monitoring Mode is separate.** Live code lives in `packages/threatgraph/live/` and
+  `apps/live/`. Never serve live data from the public research API or the static export, and
+  never feed live events into the research models. The agent, probe, parsers and channels
+  must stay standard-library only (`test_agent_and_probe_need_only_the_standard_library`).
+- **Live safety.** Test fixtures are `simulated=True` and use RFC 5737 addresses. No test
+  contacts a real recipient unless `TG_NOTIFY_LIVE_TEST=1`. Nothing blocks addresses, runs
+  commands or edits server configuration automatically. Severity follows the documented
+  criteria in docs/live/incidents.md, never a raw score.
 - Before finishing: `make lint typecheck test e2e`.
 - Next.js 16 differs from older versions; consult `apps/web/node_modules/next/dist/docs/`.

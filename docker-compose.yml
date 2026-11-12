@@ -68,11 +68,9 @@ services:
     image: threatgraph-live:local
     depends_on: [live-ingest]
     command: ["uvicorn", "threatgraph_live.dashboard:app", "--host", "0.0.0.0", "--port", "8001", "--proxy-headers", "--no-server-header"]
-    environment:
-      <<: *live-env
-      TG_LIVE_ADMIN_USER: ${TG_LIVE_ADMIN_USER:-admin}
-      TG_LIVE_ADMIN_PASSWORD_HASH: ${TG_LIVE_ADMIN_PASSWORD_HASH:-}
-      TG_LIVE_COOKIE_SECURE: ${TG_LIVE_COOKIE_SECURE:-true}
+    environment: *live-env
+    # Sign-in settings (TG_LIVE_ADMIN_USER, TG_LIVE_ADMIN_PASSWORD_HASH in single quotes)
+    # and notification secrets come from .env.live (git-ignored).
     env_file: [{ path: .env.live, required: false }]
     volumes: [live-data:/data]
     tmpfs: [/tmp]

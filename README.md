@@ -1,25 +1,36 @@
 # ThreatGraph AI
 
 Explainable behavioral anomaly detection on authentication logs, with a rigorous evaluation
-lab and an interactive website.
+lab, an interactive website, and a live monitoring mode for your own servers.
 
-ThreatGraph AI ingests authentication events in the format of the **LANL Comprehensive,
-Multi-Source Cyber-Security Events** dataset (Kent, 2015). It builds causal per-account
-behavioral and graph features, scores each account-hour with a statistical baseline and two
-Isolation Forests (with and without graph features), evaluates them on a strict chronological
-split against red-team labels, and shows the results in a web app. In the app you can move the
-alert threshold, see metrics recompute from the stored held-out scores, inspect the raw events
-behind any alert, explore which computers an alerted account moved between, and replay
-documented red-team incidents against each model's alerts.
+ThreatGraph AI has two clearly separated modes that share one codebase:
 
-> **Status: working synthetic demo with the authentication pipeline, model comparison,
-> network map, incident replay, methodology page, drift monitor and bootstrap confidence
-> intervals implemented.** The Docker stack has been verified locally, and Python/web CI
-> has passed on the published `main` branch. The demo runs on a **deterministic synthetic
-> fixture** and is labeled *Synthetic demo* everywhere. Real LANL mode is tested end to end
-> on LANL-format fixtures but has **not** been run on the official files. Additional log
-> sources, a trained supervised model and a GNN benchmark remain optional, unimplemented
-> extensions. See [What's implemented](#whats-implemented) for individual statuses.
+- **Research Mode.** Historical authentication events in the format of the **LANL
+  Comprehensive, Multi-Source Cyber-Security Events** dataset (Kent, 2015). It builds causal
+  per-account behavioral and graph features, scores each account-hour with a statistical
+  baseline and two Isolation Forests (with and without graph features), evaluates them on a
+  strict chronological split against red-team labels, and shows the results in a web app.
+  You can move the alert threshold, see metrics recompute from the stored held-out scores,
+  inspect the raw events behind any alert, explore which computers an alerted account moved
+  between, and replay documented red-team incidents against each model's alerts.
+- **Live Monitoring Mode.** A stdlib-only agent ships nginx, SSH/sudo, syslog, resource,
+  systemd, Docker and file-integrity telemetry from your own Linux servers over authenticated
+  TLS. Deterministic rules (plus an optional behavioural model) open deduplicated incidents
+  with documented severity, Telegram and e-mail notifications go out with retries and
+  cooldowns, an external probe catches whole-server outages, an optional local LLM writes
+  evidence-cited investigation notes, and a private dashboard at `/threatgraph/live` shows it
+  all. See [docs/live/](docs/live/README.md).
+
+Live events, incidents and notifications never mix with research results.
+
+> **Status.** Research Mode: working synthetic demo with model comparison, network map,
+> incident replay, methodology page, drift monitor and bootstrap confidence intervals; real
+> LANL mode is tested end to end on LANL-format fixtures but has **not** been run on the
+> official files, and the Lab shows it as *pending*. Live Monitoring Mode: implemented and
+> tested with simulated scenarios and local Telegram/SMTP stand-ins, and run locally in Docker
+> with the real agent shipping a real nginx container's logs; it has **not** been deployed to
+> a VPS or sent to a real Telegram chat or mailbox yet. See
+> [What's implemented](#whats-implemented).
 
 ## Quick start
 
@@ -44,6 +55,14 @@ python scripts/export_demo.py --dataset demo     # → apps/web/public/threatgra
 ```
 
 (Use `.venv/bin/python` or activate the venv.)
+
+Live monitoring (simulated data on your machine; real deployment: [docs/deployment.md](docs/deployment.md#live-monitoring)):
+
+```bash
+export TG_LIVE_DB=data/live/live.db
+.venv/bin/threatgraph-live simulate ssh_bruteforce && .venv/bin/threatgraph-live worker --once
+docker compose --profile live up -d --build        # ingestion, dashboard API, worker, Caddy TLS
+```
 
 Run the live API and point the website at it:
 
@@ -74,9 +93,12 @@ ThreatGraph never downloads LANL data for you.
 3. `python scripts/ingest_lanl.py --inspect-redteam` prints red-team records per day and
    suggests a `time_window` and split days where validation and test both contain red-team
    records. Paste them into `configs/datasets.yaml`.
-4. `python scripts/run_pipeline.py --dataset lanl`. Ingest streams the 7 GB file in bounded
+4. `python scripts/verify_lanl.py` checks the files (add `--full --sha256` for a complete
+   pass), and `python scripts/run_pipeline.py --dataset lanl_smoke` runs the first four days
+   as a throughput and memory check.
+5. `python scripts/run_pipeline.py --dataset lanl`. Ingest streams the 7 GB file in bounded
    blocks and stops at the window end; features and graph run in one-hour chunks.
-5. Build the site with `NEXT_PUBLIC_TG_DATASET=lanl`. In LANL mode the export replaces
+6. Build the site with `NEXT_PUBLIC_TG_DATASET=lanl`. In LANL mode the export replaces
    identifiers with salted aliases.
 
 If the files are missing, the importer prints these instructions and the demo keeps working.
@@ -112,6 +134,17 @@ Details, the real-data-mode guarantees and a scale rehearsal: [docs/real_data.md
 | GNN benchmark | ⏳ optional, not implemented; see [modeling notes](docs/modeling.md) |
 | Chunked features/graph, split suggestion, capped score tables, real-data-mode test, scale rehearsal | ✅ implemented; real LANL memory use remains unverified |
 | Run on official LANL data | ⏳ importer implemented; actual evaluation awaits user-downloaded files |
+| Raw-file integrity check (gzip completeness, columns, sorted time, sha256 vs last run), `lanl_smoke` window | ✅ implemented and tested on fixtures |
+| Research dataset status (API, export, Lab panel): real LANL shown as pending until evaluated | ✅ |
+| **Live:** stdlib-only agent (rotation-aware tailing, ack-based commits, bounded buffer, backoff, privacy filters), collectors for nginx, auth, syslog, metrics, systemd, Docker, file integrity | ✅ tested; run locally against a real nginx container |
+| **Live:** authenticated TLS ingestion (per-agent tokens bound to source, limits, dedup), SQLite store with retention and backup | ✅ |
+| **Live:** 21 deterministic rules, incidents with documented severity, dedup, escalation, auto-resolve, verdicts | ✅ tested on simulated scenarios |
+| **Live:** behavioural Isolation Forest on a dedicated feature pipeline, chronological training, false-alert rate from verdicts | ✅ tested on simulated history; no real-traffic model yet |
+| **Live:** Telegram and SMTP notifications with outbox, retries, cooldowns, recovery messages | ✅ tested against local stand-ins; real delivery unverified |
+| **Live:** external probe with direct alerts; GitHub Actions template | ✅ probe tested; template not run |
+| **Live:** optional Ollama investigation with prompt-injection and citation controls | ✅ tested with fake models; not run with a real model |
+| **Live:** private dashboard `/threatgraph/live` (sign-in, health, availability, traffic, incidents, timeline) | ✅ checked in a browser on desktop and mobile |
+| **Live:** Compose `live` profile, Caddy TLS, hardened containers, agent systemd unit, backups | ✅ verified locally (colima); not deployed to a VPS |
 
 The linked CI run covers commit `ad6d4d8` on published `main`. It does not verify the newer
 replay, research extensions or Docker CI job on this branch; those need a run after publishing
@@ -134,13 +167,17 @@ data/raw/lanl/*.txt.gz ─┴─> ingest ─> features ─> train ─> evaluate 
   features, split suggestion and the synthetic fixture. `graph/` builds and queries the entity
   graph. `ml/` holds the models and metrics. `serving/` holds the
   response schemas, the payload builders shared by the API and the export, and the exporter.
-- `apps/api/`: FastAPI app (read-only).
+- `packages/threatgraph/live/`: Live Monitoring Mode (agent, parsers, privacy, store, rules,
+  incidents, notifications, behavioural model, probe, LLM investigation).
+- `apps/api/`: FastAPI app (read-only, research).
+- `apps/live/`: live ingestion API, private dashboard API, worker and `threatgraph-live` CLI.
 - `apps/web/`: Next.js App Router, TypeScript, Tailwind v4, Recharts. Built as a static export.
 - `configs/`: dataset and model configs. Every artifact records their hash.
 - `docs/`: [architecture](docs/architecture.md), [data dictionary](docs/data_dictionary.md),
   [modeling](docs/modeling.md), [evaluation](docs/evaluation.md),
   [limitations](docs/limitations.md), [deployment](docs/deployment.md),
-  [model card](docs/model_card.md), [graph](docs/graph.md), [real data](docs/real_data.md).
+  [model card](docs/model_card.md), [graph](docs/graph.md), [real data](docs/real_data.md),
+  [live monitoring](docs/live/README.md).
 
 Results are never typed into docs by hand. `scripts/evaluate.py` writes
 `artifacts/<dataset>/reports/evaluation.md`, and the website reads the same `metrics.json`.

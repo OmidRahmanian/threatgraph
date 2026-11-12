@@ -83,3 +83,39 @@ no GPU.
 For real LANL subsets, feature building is the memory-heavy stage, because novelty uses
 first-seen times per (principal, host). Start with a window of a few days. Machine accounts are
 excluded from per-principal features by default.
+
+## Live Monitoring Mode
+
+A second, separate data flow for telemetry from your own servers ([docs/live/](live/README.md)):
+
+```
+agent (stdlib only, on each server)          external probe (another machine)
+  tail logs with rotation · /proc · systemd     HTTP checks · TLS expiry
+  parse → privacy filters → batch               direct Telegram/SMTP alerts
+        │ HTTPS, bearer token, gzip                    │ optional report (probe role)
+        ▼                                              ▼
+live-ingest   auth → source binding → size/rate limits → validation → INSERT OR IGNORE
+        │
+        ▼
+SQLite (WAL)  events · agents · incidents · incident_events · notifications · sessions
+        │
+        ▼
+live-worker   rules + behavioural model → incidents (dedup, escalation, auto-resolve)
+              → notification outbox → Telegram / SMTP (retries) · retention · retraining
+        │
+        ▼
+live-dashboard (/live-api, session auth) → /threatgraph/live (same-origin static page)
+```
+
+- **Modes do not mix.** Live code lives in `packages/threatgraph/live/` and
+  `apps/live/threatgraph_live/`; the research API, payloads and static export are untouched
+  and never read live data. Shared pieces: the robust scaling and Isolation Forest helpers,
+  the website shell and design tokens.
+- **Agent depends on nothing.** The agent, probe, parsers and notification channels use only
+  the standard library (a test enforces it), so they run on any server with Python 3.11.
+- **SQLite behind an interface.** `LiveStore` is the only storage access; a Postgres backend
+  could replace it for several hosts with heavy traffic.
+- **Deterministic first.** Rules decide incidents and severity; the model adds `info`
+  findings; the optional LLM only writes advisory notes.
+- **Missing data is explicit.** Intervals with no agent reporting are `null` in every API and
+  drawn as gaps.
