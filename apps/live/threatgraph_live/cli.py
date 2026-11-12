@@ -41,6 +41,7 @@ def main(argv: list[str] | None = None) -> None:
     w = sub.add_parser("worker")
     w.add_argument("--once", action="store_true")
     sub.add_parser("train-model")
+    sub.add_parser("health", help="exit 1 unless the worker completed a cycle recently")
     sub.add_parser("notify-test")
     s = sub.add_parser("simulate", help="insert SIMULATED events (local testing only)")
     s.add_argument("scenario", choices=sorted(scenarios.SCENARIOS))
@@ -101,6 +102,13 @@ def main(argv: list[str] | None = None) -> None:
             print(json.dumps(wk.cycle(), indent=2, default=str))
         else:
             wk.run()
+    elif args.cmd == "health":
+        st = store.kv_get("worker_status")
+        age = None if not st else time.time() - st["last_run"]
+        limit = 3 * cfg.detection.interval_seconds + 60
+        print(json.dumps({"last_run_age_seconds": age, "errors": (st or {}).get("errors")}))
+        if age is None or age > limit:
+            sys.exit(1)
     elif args.cmd == "train-model":
         print(json.dumps(behavior.train(store, cfg, settings.db_path), indent=2, default=str))
     elif args.cmd == "simulate":

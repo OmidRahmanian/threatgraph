@@ -375,3 +375,43 @@ def test_file_integrity_baseline_then_changes(tmp_path: Path) -> None:
     changes = {(Path(e.attrs["path"]).name, e.attrs["change"]) for e in c.collect(2.0)}
     assert changes == {("sshd_config", "modified"), ("y.conf", "added"), ("x.conf", "removed")}
     assert c.collect(3.0) == []
+
+
+def test_agent_and_probe_need_only_the_standard_library() -> None:
+    """The agent and probe run on hosts without the scientific stack (pip install --no-deps)."""
+    import subprocess
+    import sys
+
+    root = Path(__file__).resolve().parents[2]
+    code = (
+        "import sys, importlib.abc\n"
+        "class Block(importlib.abc.MetaPathFinder):\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        top = name.split('.')[0]\n"
+        "        if top in {'numpy','polars','pyarrow','duckdb','sklearn','pydantic','yaml','fastapi','joblib'}:\n"
+        "            raise ImportError('third-party import: ' + name)\n"
+        "sys.meta_path.insert(0, Block())\n"
+        "import threatgraph.live.agent, threatgraph.live.probe\n"
+        "print('stdlib-only')\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        env={"PYTHONPATH": str(root / "packages")},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert out.stdout.strip() == "stdlib-only", out.stderr
+
+
+def test_heartbeat_counts_lines_read_in_the_same_round(tmp_path: Path) -> None:
+    log = tmp_path / "access.log"
+    log.write_text(access_lines(0, 3) + "garbage\n")
+    server = FakeServer()
+    agent, _ = make_agent(tmp_path, server, [LogSpec("nginx_access", str(log))])
+    agent.next_heartbeat = 0.0
+    agent.collect()
+    agent.flush(force=True)
+    (hb,) = server.kinds("agent.heartbeat")
+    assert hb["attrs"]["logs"][str(log)]["parsed"] == 3
+    assert hb["attrs"]["logs"][str(log)]["unparsed"] == 1

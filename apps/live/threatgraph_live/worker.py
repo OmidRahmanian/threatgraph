@@ -84,7 +84,10 @@ class Worker:
         if self.cfg.ml.enabled:
             rep = behavior.load_report(self.db_path)
             age_h = (now - rep["trained_at"]) / 3600 if rep else float("inf")
-            if age_h >= self.cfg.ml.retrain_hours:
+            untrained = (
+                rep is None or rep.get("status") != "trained"
+            )  # retry hourly until enough history
+            if untrained or age_h >= self.cfg.ml.retrain_hours:
                 rep = behavior.train(self.store, self.cfg, self.db_path, now=now)
                 self.model = (
                     behavior.load_model(self.db_path) if rep["status"] == "trained" else None

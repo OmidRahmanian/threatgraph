@@ -87,6 +87,10 @@ def create_dashboard_app(
             raise HTTPException(403, "missing X-TG-Request header")
         return u
 
+    @app.get(f"{PREFIX}/health")
+    def health() -> dict[str, str]:  # liveness only: no data, no auth needed
+        return {"status": "ok"}
+
     # ------------------------------------------------------------------ auth
     @app.post(f"{PREFIX}/auth/login")
     def login(body: Login, request: Request, response: Response) -> dict[str, Any]:

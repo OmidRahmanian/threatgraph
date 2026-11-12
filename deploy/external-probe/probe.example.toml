@@ -1,0 +1,19 @@
+# External availability probe. Run it on a machine OTHER than the monitored server.
+# Alerts directly through TG_TELEGRAM_BOT_TOKEN/TG_TELEGRAM_CHAT_ID or TG_SMTP_* environment
+# variables, and optionally reports results to ThreatGraph (TG_PROBE_TOKEN, probe role).
+probe_id = "probe-home"
+interval_seconds = 60
+consecutive_failures = 2
+state_file = "/var/lib/threatgraph-probe/state.json"
+direct_alerts = true
+# report_url = "https://monitor.example.com:8443"   # ingestion endpoint; omit to only alert
+# report_token_file = "/etc/threatgraph-probe/token"
+# ca_file = "/etc/threatgraph-probe/ca.pem"
+
+[[targets]]
+name = "website"
+url = "https://example.com/"
+expect_status = [200]
+# expect_text = "</html>"
+timeout_seconds = 10
+service = "website"

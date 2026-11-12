@@ -1,6 +1,23 @@
-# Local services: the read-only API and nginx serving the static site.
-# Build first: `make demo && make web-build`, then `docker compose up --build`.
-# Ports are configurable: TG_API_PORT (default 8000), TG_WEB_PORT (default 8080).
+# Default (Research Mode, unchanged): the read-only API and nginx serving the static site.
+#   make demo && make web-build && docker compose up --build
+#   Ports: TG_API_PORT (default 8000), TG_WEB_PORT (default 8080).
+#
+# Live Monitoring Mode adds services under the `live` profile (docs/live/deployment.md):
+#   docker compose --profile live up -d --build
+# Optional local LLM for AI-assisted investigation: add `--profile llm`.
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-live-env: &live-env
+  TG_LIVE_DB: /data/live.db
+  TG_LIVE_CONFIG: /app/configs/live.yaml
+
 services:
   api:
     build:
@@ -28,3 +45,93 @@ services:
       - ./apps/web/out:/usr/share/nginx/html:ro
     read_only: true
     tmpfs: [/var/cache/nginx, /var/run, /tmp]
+
+  # ------------------------------------------------------------------ Live Monitoring Mode
+  live-ingest:
+    profiles: [live]
+    build: { context: ., dockerfile: apps/live/Dockerfile }
+    image: threatgraph-live:local
+    command: ["uvicorn", "threatgraph_live.ingest:app", "--host", "0.0.0.0", "--port", "8002", "--proxy-headers", "--no-server-header"]
+    environment: *live-env
+    volumes: [live-data:/data]
+    tmpfs: [/tmp]
+    <<: *hardening
+    deploy: { resources: { limits: { memory: 256M, cpus: "0.50" } } }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8002/ingest/v1/health')"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+
+  live-dashboard:
+    profiles: [live]
+    image: threatgraph-live:local
+    depends_on: [live-ingest]
+    command: ["uvicorn", "threatgraph_live.dashboard:app", "--host", "0.0.0.0", "--port", "8001", "--proxy-headers", "--no-server-header"]
+    environment:
+      <<: *live-env
+      TG_LIVE_ADMIN_USER: ${TG_LIVE_ADMIN_USER:-admin}
+      TG_LIVE_ADMIN_PASSWORD_HASH: ${TG_LIVE_ADMIN_PASSWORD_HASH:-}
+      TG_LIVE_COOKIE_SECURE: ${TG_LIVE_COOKIE_SECURE:-true}
+    env_file: [{ path: .env.live, required: false }]
+    volumes: [live-data:/data]
+    tmpfs: [/tmp]
+    <<: *hardening
+    deploy: { resources: { limits: { memory: 384M, cpus: "0.50" } } }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8001/live-api/v1/health')"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+
+  live-worker:
+    profiles: [live]
+    image: threatgraph-live:local
+    depends_on: [live-ingest]
+    command: ["threatgraph-live", "worker"]
+    environment: *live-env
+    env_file: [{ path: .env.live, required: false }]
+    volumes: [live-data:/data, ./backups:/backups]
+    tmpfs: [/tmp]
+    <<: *hardening
+    deploy: { resources: { limits: { memory: 512M, cpus: "0.75" } } }
+    healthcheck:
+      test: ["CMD", "threatgraph-live", "health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  caddy:
+    profiles: [live]
+    image: caddy:2.8-alpine
+    depends_on: [api, live-dashboard, live-ingest]
+    environment:
+      TG_DOMAIN: ${TG_DOMAIN:-localhost}
+      TG_INGEST_ADDRESS: ${TG_INGEST_ADDRESS:-https://localhost:8443}
+    ports:
+      - "${TG_HTTP_PORT:-80}:80"
+      - "${TG_HTTPS_PORT:-443}:443"
+      # Agents only: bind to a private interface (WireGuard/Tailscale address), never 0.0.0.0.
+      - "${TG_INGEST_BIND:-127.0.0.1}:8443:8443"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./apps/web/out:/srv/site:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    cap_add: [NET_BIND_SERVICE]
+    <<: *hardening
+    deploy: { resources: { limits: { memory: 128M, cpus: "0.50" } } }
+
+  ollama:
+    profiles: [llm]
+    image: ollama/ollama:0.5.7
+    volumes: [ollama:/root/.ollama]
+    restart: unless-stopped
+    deploy: { resources: { limits: { memory: 6G } } }
+
+volumes:
+  live-data:
+  caddy-data:
+  caddy-config:
+  ollama:

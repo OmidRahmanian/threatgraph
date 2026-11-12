@@ -510,9 +510,6 @@ class Agent:
                 self._add_samples(c.collect(now))
                 if isinstance(c, FileIntegrityCollector):
                     self.state.data["fim_baseline"] = c.baseline
-        if now_m >= self.next_heartbeat:
-            self.next_heartbeat = now_m + self.cfg.heartbeat_interval_seconds
-            self._add_samples([self.heartbeat(now)])
         tz = self.cfg.tz
         for path, tailer in self.tailers.items():
             if self.room() <= 0:
@@ -533,6 +530,10 @@ class Agent:
                 self.parsed[path] += 1
                 ev = normalize(p, spec, pos, line, self.cfg.source_id, self.cfg.privacy)
                 self.buffer.append(Buffered(ev, (path, pos)))
+        # After reading the logs, so the heartbeat's parse counters are current.
+        if now_m >= self.next_heartbeat:
+            self.next_heartbeat = now_m + self.cfg.heartbeat_interval_seconds
+            self._add_samples([self.heartbeat(now)])
 
     def heartbeat(self, now: float) -> LiveEvent:
         return LiveEvent(

@@ -1,0 +1,46 @@
+# Optional external uptime check on GitHub Actions (free, independent of your VPS).
+# NOT active: copy to .github/workflows/uptime.yml in a repository you control, then add the
+# repository secrets TG_PROBE_URLS (space-separated URLs) and either
+# TG_TELEGRAM_BOT_TOKEN + TG_TELEGRAM_CHAT_ID or TG_SMTP_* .
+# GitHub runs scheduled workflows at most every 5 minutes and may delay them, so treat this
+# as a backstop; a probe on a second machine reacts faster. The state file is kept in the
+# Actions cache so one outage produces one alert and one recovery message.
+name: uptime
+on:
+  schedule: [{ cron: "*/5 * * * *" }]
+  workflow_dispatch:
+permissions: { contents: read }
+concurrency: { group: uptime, cancel-in-progress: false }
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/cache/restore@v4
+        with: { path: probe-state.json, key: "uptime-${{ github.run_id }}", restore-keys: "uptime-" }
+      - name: Write probe config
+        env: { URLS: "${{ secrets.TG_PROBE_URLS }}" }
+        run: |
+          {
+            echo 'probe_id = "github-actions"'
+            echo 'consecutive_failures = 2'
+            echo 'state_file = "probe-state.json"'
+            i=0; for u in $URLS; do i=$((i+1)); printf '[[targets]]\nname = "site%s"\nurl = "%s"\n' "$i" "$u"; done
+          } > probe.toml
+      - name: Check
+        env:
+          TG_TELEGRAM_BOT_TOKEN: ${{ secrets.TG_TELEGRAM_BOT_TOKEN }}
+          TG_TELEGRAM_CHAT_ID: ${{ secrets.TG_TELEGRAM_CHAT_ID }}
+          TG_SMTP_HOST: ${{ secrets.TG_SMTP_HOST }}
+          TG_SMTP_PORT: ${{ secrets.TG_SMTP_PORT }}
+          TG_SMTP_USER: ${{ secrets.TG_SMTP_USER }}
+          TG_SMTP_PASSWORD: ${{ secrets.TG_SMTP_PASSWORD }}
+          TG_SMTP_FROM: ${{ secrets.TG_SMTP_FROM }}
+          TG_SMTP_TO: ${{ secrets.TG_SMTP_TO }}
+        run: PYTHONPATH=packages python -m threatgraph.live.probe --config probe.toml --once || true
+      - uses: actions/cache/save@v4
+        if: always()
+        with: { path: probe-state.json, key: "uptime-${{ github.run_id }}" }

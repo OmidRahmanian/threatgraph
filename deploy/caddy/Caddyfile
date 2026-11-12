@@ -1,0 +1,49 @@
+# TLS reverse proxy for a single-VPS deployment (docker compose --profile live).
+# Public site: static website + read-only research API + private live dashboard API (same
+# origin, so the dashboard's session cookie is first-party and no CORS is needed).
+{
+	admin off
+}
+
+{$TG_DOMAIN:localhost} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		X-Frame-Options DENY
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+		-Server
+	}
+	handle /live-api/* {
+		reverse_proxy live-dashboard:8001
+	}
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+	# Ingestion is never exposed on the public site.
+	handle /ingest/* {
+		respond 404
+	}
+	handle {
+		root * /srv/site
+		try_files {path} {path}/index.html
+		file_server
+	}
+}
+
+# Ingestion endpoint for agents and probes. Bind it to a private address (WireGuard,
+# Tailscale) with TG_INGEST_ADDRESS, e.g. "https://10.8.0.1:8443". `tls internal` issues a
+# certificate from Caddy's own CA; give that CA to agents with `ca_file`.
+{$TG_INGEST_ADDRESS:https://localhost:8443} {
+	tls internal
+	request_body {
+		max_size 6MB
+	}
+	handle /ingest/* {
+		reverse_proxy live-ingest:8002
+	}
+	handle {
+		respond 404
+	}
+}

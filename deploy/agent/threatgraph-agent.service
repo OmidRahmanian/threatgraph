@@ -1,0 +1,50 @@
+# ThreatGraph collector agent (read-only telemetry). Install: deploy/agent/install.sh
+[Unit]
+Description=ThreatGraph collector agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tg-agent
+Group=tg-agent
+# Read access to logs without root: adm (Debian/Ubuntu auth.log, syslog, nginx logs) and
+# systemd-journal. Add docker ONLY if you accept root-equivalent access (prefer a socket proxy).
+SupplementaryGroups=adm systemd-journal
+ExecStart=/opt/threatgraph-agent/venv/bin/python -m threatgraph.live.agent --config /etc/threatgraph-agent/agent.toml
+Restart=always
+RestartSec=10
+StateDirectory=threatgraph-agent
+StateDirectoryMode=0700
+
+# Hardening: no privileges, no writes outside the state directory.
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ReadWritePaths=/var/lib/threatgraph-agent
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+
+# Resource limits for a small VPS.
+MemoryMax=128M
+CPUQuota=20%
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target

@@ -33,3 +33,9 @@ apps/web/public/threatgraph-data/
 .env.local
 **/.export_salt
 .DS_Store
+
+# Live monitoring: database, models, backups and secrets stay local.
+data/live/
+backups/
+.env.live
+*.db

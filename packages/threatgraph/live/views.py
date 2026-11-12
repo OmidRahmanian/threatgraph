@@ -32,7 +32,17 @@ def _buckets(now: float, rng: str) -> tuple[float, int, list[int]]:
 
 
 def coverage(store: LiveStore, start: float, end: float, b: int, simulated: bool) -> set[int]:
-    """Buckets during which at least one host agent was reporting."""
+    """Buckets during which at least one host agent was reporting.
+
+    Simulated scenarios have no agent behind them; for simulated data a bucket counts as
+    covered when it holds any simulated event."""
+    if simulated:
+        rows = store.query(
+            "SELECT DISTINCT CAST(ts / ? AS INTEGER) * ? b FROM events WHERE simulated = 1 "
+            "AND ts >= ? AND ts < ?",
+            (b, b, start, end),
+        )
+        return {int(r["b"]) for r in rows}
     rows = store.query(
         "SELECT ts FROM events WHERE kind IN ('agent.heartbeat', 'system.metrics') "
         "AND ts >= ? AND ts < ? AND simulated = ?",

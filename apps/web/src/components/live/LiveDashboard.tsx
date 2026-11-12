@@ -290,7 +290,7 @@ function Agents({ ov }: { ov: Overview }) {
         <p className="text-sm text-ink-3">No agent registered. Add one with `threatgraph-live agent add &lt;name&gt;`.</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm" data-testid="agents-table">
+          <table className="w-full min-w-[640px] text-left text-sm" data-testid="agents-table">
             <thead className="text-xs text-ink-3">
               <tr>
                 <th className="py-1 pr-3 font-medium">Source</th>
@@ -320,7 +320,7 @@ function Agents({ ov }: { ov: Overview }) {
                   </td>
                   <td className="py-1.5 text-xs text-ink-2">
                     {a.logs.map((l) => (
-                      <div key={l.path}>
+                      <div key={l.path} className="break-all">
                         {l.path}: {l.readable === false ? "not readable" : `${int(l.parsed ?? 0)} parsed, ${int(l.unparsed ?? 0)} unrecognised`}
                       </div>
                     ))}
@@ -418,7 +418,7 @@ function IncidentTable({ rows, onOpen }: { rows: IncidentRow[]; onOpen: (id: str
   if (rows.length === 0) return <p className="text-sm text-ink-3" data-testid="no-incidents">No incidents in this view.</p>;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm" data-testid="incidents-table">
+      <table className="w-full min-w-[560px] text-left text-sm" data-testid="incidents-table">
         <thead className="text-xs text-ink-3">
           <tr>
             <th className="py-1 pr-3 font-medium">Severity</th>
@@ -462,11 +462,16 @@ function EventTable({ events }: { events: LiveEvent[] }) {
       <table className="w-full text-left text-xs" data-testid="events-table">
         <tbody>
           {events.map((e) => (
-            <tr key={e.rowid} className="border-t border-line first:border-t-0">
-              <td className="whitespace-nowrap px-2 py-1 text-ink-3">{utc(e.ts)}</td>
-              <td className="px-2 py-1 text-ink-3">{e.source_id}</td>
-              <td className="px-2 py-1 text-ink-3">{e.kind}</td>
-              <td className="break-all px-2 py-1 text-ink-2">{describeEvent(e)}</td>
+            <tr key={e.rowid} className="border-t border-line first:border-t-0 align-top">
+              <td className="hidden whitespace-nowrap px-2 py-1 text-ink-3 sm:table-cell">{utc(e.ts)}</td>
+              <td className="hidden px-2 py-1 text-ink-3 sm:table-cell">{e.source_id}</td>
+              <td className="hidden px-2 py-1 text-ink-3 sm:table-cell">{e.kind}</td>
+              <td className="px-2 py-1 text-ink-2">
+                <div className="text-ink-3 sm:hidden">
+                  {utc(e.ts)} · {e.source_id} · {e.kind}
+                </div>
+                <div className="break-words [overflow-wrap:anywhere]">{describeEvent(e)}</div>
+              </td>
             </tr>
           ))}
         </tbody>
