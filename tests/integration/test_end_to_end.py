@@ -35,6 +35,7 @@ def built(tmp_path_factory: pytest.TempPathFactory):
     pipeline.run_graph(cfg)
     pipeline.run_train(cfg, mcfg)
     pipeline.run_evaluate(cfg, mcfg)
+    mcfg = pipeline.active_models(cfg, mcfg)[0]  # models this dataset supports (M2 is gated)
     ctx = ServingContext(cfg, mcfg, public_ids=True)
     datasets_yaml = write_datasets_yaml(root / "datasets.yaml", cfg)
     bundle = export_bundle(ctx, root / "export", datasets_yaml)

@@ -62,6 +62,28 @@ FEATURE_DESCRIPTIONS: dict[str, str] = {
     "shortly before (two-hop path)",
 }
 
+# Optional process-log features (threatgraph.data.process_features); null when the dataset
+# has no proc file, and models that need them are then skipped.
+PROCESS_FEATURES: dict[str, str] = {
+    "n_proc_start": "Processes started by the account in the window (process log)",
+    "n_distinct_proc": "Distinct process names the account started in the window",
+    "n_novel_proc": "Process names this account had never started before",
+    "n_rare_proc": "Process names no other account had started before the window",
+    "n_proc_hosts": "Distinct computers on which the account started processes",
+    "n_proc_after_remote": "Processes started on a computer within 5 minutes after the account "
+    "logged on to it from another computer",
+}
+
+# Graph-embedding features (threatgraph.graph.embedding).
+EMBEDDING_FEATURES: dict[str, str] = {
+    "emb_dst_surprise_max": "Largest graph-embedding distance between the account and a "
+    "destination it reached (embedding of all earlier days)",
+    "emb_dst_surprise_mean": "Mean graph-embedding distance between the account and the "
+    "destinations it reached",
+}
+FEATURE_DESCRIPTIONS.update(PROCESS_FEATURES)
+FEATURE_DESCRIPTIONS.update(EMBEDDING_FEATURES)
+
 ID_COLUMNS = ["window_id", "src_principal", "window_start", "window_end", "day", "split"]
 LABEL_COLUMNS = ["n_labeled_events", "label"]
 TIME_COLUMNS = ["first_event_seconds", "last_event_seconds", "first_labeled_event_seconds"]
@@ -350,15 +372,21 @@ def build_window_features(
     auth: pl.LazyFrame,
     labels: pl.DataFrame,
     cfg: DatasetConfig,
+    proc: pl.LazyFrame | None = None,
 ) -> pl.DataFrame:
-    """Compute the feature table. `auth` must follow the internal auth schema."""
+    """Compute the feature table. `auth` must follow the internal auth schema; `proc` (the
+    optional process log) adds the process features, which are null without it."""
+    from threatgraph.data.process_features import build_process_features
+    from threatgraph.graph.embedding import build_embedding_features
+
     w = cfg.features.window_seconds
     k = cfg.features.baseline_windows
     label_ev = labels.select("event_id").with_columns(pl.lit(1).alias("_lab"))
 
     st = _State()
     parts = []
-    for start, end in time_chunks(auth, cfg.features.chunk_seconds):
+    chunks = time_chunks(auth, cfg.features.chunk_seconds)
+    for start, end in chunks:
         part = _chunk_features(chunk_of(auth, start, end), label_ev, cfg, st, end)
         if part is not None:
             parts.append(part)
@@ -410,6 +438,21 @@ def build_window_features(
         std = prev.rolling_std(k, min_samples=2).fill_null(0.0)
         return ((pl.col(col) - mean) / (std + 1.0)).fill_null(0.0).over("src_principal").alias(name)
 
+    if proc is not None:
+        pf = build_process_features(proc, auth, cfg, chunks)
+        df = df.join(pf.lazy(), on=KEYS, how="left").with_columns(
+            pl.col(c).fill_null(0).cast(pl.Int64) for c in PROCESS_FEATURES
+        )
+    else:
+        df = df.with_columns(pl.lit(None, dtype=pl.Int64).alias(c) for c in PROCESS_FEATURES)
+    emb = build_embedding_features(auth, cfg)
+    # Joins do not keep row order; the rolling baselines below need it.
+    df = (
+        df.join(emb.lazy(), on=KEYS, how="left")
+        .with_columns(pl.col(c).fill_null(0.0) for c in EMBEDDING_FEATURES)
+        .sort("src_principal", "window_start")
+    )
+
     df = df.with_columns(
         z("n_events", "z_events"),
         z("n_distinct_dst", "z_distinct_dst"),
@@ -449,6 +492,10 @@ def split_summary(features: pl.DataFrame) -> list[dict[str, Any]]:
         .agg(
             pl.len().alias("n_windows"),
             pl.col("label").sum().alias("n_positive_windows"),
+            pl.col("src_principal")
+            .filter(pl.col("label") == 1)
+            .n_unique()
+            .alias("n_positive_accounts"),
             pl.col("n_labeled_events").sum().alias("n_labeled_events"),
             pl.col("src_principal").n_unique().alias("n_principals"),
             pl.col("window_start").min().alias("start_seconds"),

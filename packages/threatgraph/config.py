@@ -140,12 +140,17 @@ class DatasetConfig(BaseModel):
     def raw_file(self, kind: str) -> Path:
         return self.raw_path / self.files[kind]
 
+    @property
+    def has_proc(self) -> bool:
+        """Process logs are optional; they are used when `files.proc` is configured."""
+        return "proc" in self.files
+
 
 class ModelSpec(BaseModel):
-    kind: Literal["robust_z", "isolation_forest"]
+    kind: Literal["robust_z", "isolation_forest", "supervised_gbm"]
     display_name: str
     description: str | None = None
-    # A list of feature names, "all", or the name of a group in `feature_groups`.
+    # A list of feature names and/or group names, "all", or the name of one group.
     features: list[str] | str
     params: dict[str, Any] = {}
 
@@ -193,7 +198,10 @@ class ModelsConfig(BaseModel):
     def features_for(self, model_id: str) -> list[str]:
         spec = self.models[model_id]
         if isinstance(spec.features, list):
-            return list(spec.features)
+            out: list[str] = []
+            for f in spec.features:
+                out += self.feature_groups.get(f, [f])
+            return out
         if spec.features == "all":
             return self.features
         return list(self.feature_groups[spec.features])

@@ -61,7 +61,7 @@ def _model_results(metrics: dict[str, Any]) -> list[S.DatasetModelResult]:
 
 
 def dataset_status(cfg: DatasetConfig, mcfg: ModelsConfig) -> S.DatasetStatus:
-    present = {k: cfg.raw_file(k).exists() for k in ("auth", "redteam")}
+    present = {k: cfg.raw_file(k).exists() for k in cfg.files}
     runs = load_run_records(cfg) if cfg.artifacts_path.exists() else {}
     seconds = {k: float(v["seconds"]) for k, v in runs.items() if "seconds" in v}
     rss = {k: float(v["peak_rss_mb"]) for k, v in runs.items() if "peak_rss_mb" in v}

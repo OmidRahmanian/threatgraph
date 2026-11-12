@@ -18,7 +18,7 @@ REDTEAM = ["2,U2@DOM1,C2,C3"]
 
 
 def _files(tmp: Path, auth: list[str], redteam: list[str] = REDTEAM):
-    cfg = make_cfg(tmp)
+    cfg = make_cfg(tmp, files={"auth": "auth.txt.gz", "redteam": "redteam.txt.gz"})
     write_gz(cfg.raw_file("auth"), auth)
     write_gz(cfg.raw_file("redteam"), redteam)
     return cfg

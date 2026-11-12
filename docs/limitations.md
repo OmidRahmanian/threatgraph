@@ -49,6 +49,16 @@
 18. **Faithfulness test baseline.** The deletion test resets features to training medians; a
     different baseline (for example a per-account median) could rank explanations differently.
 
+29. **M2 learns from incomplete labels.** Unlabeled windows are negatives for fitting, so M2
+    is pushed away from undocumented attacker activity. It trains only when labels permit,
+    which the demo does not.
+30. **Process features on the demo are not a win.** M4 scores below M3 on the synthetic test
+    split; benign new programs (rollout, admin tools, new hires) look as unusual as attacker
+    tools. Real LANL process data may behave differently and is untested.
+31. **Graph embeddings are linear and daily.** M5 uses a truncated SVD refreshed per day, not
+    a learned GNN; same-day structure is not in the embedding, and new accounts or computers
+    have none.
+
 ## Live Monitoring Mode
 
 19. **Not yet run on your VPS.** Every component is tested with simulated events and local

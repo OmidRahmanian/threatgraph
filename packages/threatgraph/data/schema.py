@@ -53,3 +53,16 @@ LABEL_SCHEMA: dict[str, pl.DataType] = {
     "redteam_record_id": pl.Int64(),
     "match_multiplicity": pl.Int64(),  # auth events sharing this red-team key (>1 = ambiguous)
 }
+
+# LANL proc.txt: process start/end events per (user@domain, computer). Optional source.
+PROC_SOURCE_COLUMNS: tuple[str, ...] = ("time", "principal", "computer", "process", "action")
+PROC_ACTIONS = frozenset({"Start", "End"})
+
+PROC_EVENT_SCHEMA: dict[str, pl.DataType] = {
+    "event_time_seconds": pl.Int64(),
+    "day": pl.Int32(),
+    "principal": pl.String(),
+    "computer": pl.String(),
+    "process": pl.String(),
+    "action": pl.String(),
+}

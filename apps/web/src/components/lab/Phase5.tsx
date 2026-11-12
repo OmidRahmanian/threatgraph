@@ -2,7 +2,7 @@
 
 import { api, useLoad } from "@/lib/data";
 import { pct } from "@/lib/format";
-import type { Drift, ModelInfo, ModelMetrics, SupervisedDecision } from "@/lib/types";
+import type { Drift, ModelInfo, ModelMetrics, SkippedModel, SupervisedDecision } from "@/lib/types";
 import { Callout, ErrorBlock, LoadingBlock, Panel, ProvenanceBadge, SectionTitle } from "../ui";
 
 /** Deletion test: does the explanation point at what drives the score? */
@@ -56,6 +56,22 @@ export function FaithfulnessPanel({ metrics }: { metrics: ModelMetrics }) {
         is the model&apos;s internal reasoning. Resetting to the median is itself a choice of baseline.
       </p>
     </Panel>
+  );
+}
+
+export function SkippedModels({ skipped }: { skipped: SkippedModel[] }) {
+  if (!skipped.length) return null;
+  return (
+    <Callout title="Configured models not trained on this dataset">
+      <ul className="space-y-1" data-testid="skipped-models">
+        {skipped.map((m) => (
+          <li key={m.model_id}>
+            <span className="font-medium text-ink">{m.display_name}</span>: {m.reason}
+          </li>
+        ))}
+      </ul>
+      <p>A model is never trained on inputs or labels the dataset does not have, and no values are filled in for them.</p>
+    </Callout>
   );
 }
 

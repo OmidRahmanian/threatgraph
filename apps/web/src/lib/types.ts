@@ -127,10 +127,18 @@ export interface BootstrapInfo {
 
 export interface SupervisedDecision {
   trained: boolean;
+  model_ids?: string[];
   labels_permit: boolean;
   train_positive_windows: number;
   train_positive_accounts: number;
   required: Record<string, number>;
+  reason: string;
+}
+
+export interface SkippedModel {
+  model_id: string;
+  display_name: string;
+  kind: string;
   reason: string;
 }
 
@@ -140,6 +148,8 @@ export interface ModelList {
   ablations: Ablation[];
   bootstrap: Record<string, BootstrapInfo>;
   supervised_model: SupervisedDecision;
+  /** Configured models this dataset cannot support; older bundles omit it. */
+  skipped_models?: SkippedModel[];
 }
 
 export interface ThresholdPoint {

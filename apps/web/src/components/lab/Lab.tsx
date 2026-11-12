@@ -20,7 +20,7 @@ import {
 import { PRCurve, ScoreDistribution } from "./Charts";
 import { ResearchDatasets } from "./Datasets";
 import { ExplanationView } from "./ExplanationView";
-import { DriftPanel, FaithfulnessPanel, SupervisedNote } from "./Phase5";
+import { DriftPanel, FaithfulnessPanel, SkippedModels, SupervisedNote } from "./Phase5";
 import { ThresholdPanel } from "./ThresholdPanel";
 
 const SPLITS: { value: EvalSplit; label: string }[] = [
@@ -73,6 +73,8 @@ export function Lab() {
 
       <DriftPanel models={models.models} />
       <SupervisedNote decision={models.supervised_model} />
+      {/* The supervised note above already explains a gated supervised model. */}
+      <SkippedModels skipped={(models.skipped_models ?? []).filter((m) => m.kind !== "supervised_gbm")} />
 
       <div className="flex flex-wrap items-center gap-3">
         <Segmented
@@ -156,7 +158,13 @@ function AblationPanel({ ablation: a, models }: { ablation: Ablation; models: Mo
         title={a.title}
         subtitle={
           <>
-            {name(a.candidate)} adds {a.added_features.map((f) => <code key={f} className="mr-1 font-mono text-xs">{f}</code>)}
+            {name(a.candidate)} adds{" "}
+            {a.added_features.map((f, i) => (
+              <span key={f}>
+                {i ? ", " : ""}
+                <code className="break-all font-mono text-xs">{f}</code>
+              </span>
+            ))}{" "}
             to {name(a.baseline)}; everything else (hyperparameters, seed, threshold policy) is the same.
           </>
         }

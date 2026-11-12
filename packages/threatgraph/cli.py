@@ -17,7 +17,8 @@ LANL source files not found: {missing}
 
 ThreatGraph never downloads the LANL data for you. To use real data:
   1. Visit https://csr.lanl.gov/data/cyber1/ and complete LANL's data-use form.
-  2. Download auth.txt.gz and redteam.txt.gz (auth is ~7 GB compressed).
+  2. Download auth.txt.gz and redteam.txt.gz (auth is ~7 GB compressed), and proc.txt.gz
+     if `proc` is enabled for this dataset in configs/datasets.yaml (optional).
   3. Place them in {raw_dir}/ (this directory is git-ignored; never commit them).
   4. Run: python scripts/ingest_lanl.py --inspect-redteam
      then choose time_window / splits in configs/datasets.yaml so each evaluated split
@@ -49,7 +50,7 @@ def cmd_generate(args: argparse.Namespace) -> None:
 
 
 def _check_raw(cfg: DatasetConfig) -> None:
-    missing = [k for k in ("auth", "redteam") if not cfg.raw_file(k).exists()]
+    missing = [k for k in cfg.files if not cfg.raw_file(k).exists()]
     if not missing:
         return
     if cfg.mode == "lanl":

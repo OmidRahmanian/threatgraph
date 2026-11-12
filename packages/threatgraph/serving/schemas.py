@@ -144,10 +144,18 @@ class BootstrapInfo(BaseModel):
 
 class SupervisedDecision(BaseModel):
     trained: bool
+    model_ids: list[str] = []
     labels_permit: bool
     train_positive_windows: int
     train_positive_accounts: int
     required: dict[str, int]
+    reason: str
+
+
+class SkippedModel(BaseModel):
+    model_id: str
+    display_name: str
+    kind: str
     reason: str
 
 
@@ -157,6 +165,8 @@ class ModelList(BaseModel):
     ablations: list[Ablation]
     bootstrap: dict[str, BootstrapInfo]
     supervised_model: SupervisedDecision
+    # Configured models this dataset cannot support (missing inputs or too few labels).
+    skipped_models: list[SkippedModel] = []
 
 
 class ThresholdPoint(BaseModel):

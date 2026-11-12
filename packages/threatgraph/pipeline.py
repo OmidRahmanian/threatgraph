@@ -20,8 +20,20 @@ from threatgraph.config import (
     ModelsConfig,
     config_hash,
 )
-from threatgraph.data.features import FEATURE_DESCRIPTIONS, build_window_features, split_summary
-from threatgraph.data.ingest import auth_glob, ingest_auth, ingest_redteam, write_json
+from threatgraph.data.features import (
+    FEATURE_DESCRIPTIONS,
+    PROCESS_FEATURES,
+    build_window_features,
+    split_summary,
+)
+from threatgraph.data.ingest import (
+    auth_glob,
+    ingest_auth,
+    ingest_proc,
+    ingest_redteam,
+    proc_glob,
+    write_json,
+)
 from threatgraph.data.redteam import match_redteam
 from threatgraph.graph.build import build_edge_table, build_entity_tables
 from threatgraph.ml.drift import drift_report
@@ -80,6 +92,68 @@ def scan_auth(cfg: DatasetConfig) -> pl.LazyFrame:
     return pl.scan_parquet(auth_glob(cfg.processed_path), hive_partitioning=True)
 
 
+def scan_proc(cfg: DatasetConfig) -> pl.LazyFrame:
+    return pl.scan_parquet(proc_glob(cfg.processed_path), hive_partitioning=True)
+
+
+def feature_manifest_path(cfg: DatasetConfig) -> Path:
+    return features_path(cfg).parent / "feature_manifest.json"
+
+
+def supervised_gate_decision(n_pos: int, n_acc: int, mcfg: ModelsConfig) -> tuple[bool, str]:
+    gate = mcfg.supervised_gate
+    ok = n_pos >= gate.min_positive_windows and n_acc >= gate.min_positive_accounts
+    reason = (
+        f"The training split has {n_pos} known red-team windows from {n_acc} accounts; "
+        f"a supervised model needs at least {gate.min_positive_windows} from "
+        f"{gate.min_positive_accounts}."
+    )
+    return ok, reason
+
+
+def active_models(cfg: DatasetConfig, mcfg: ModelsConfig) -> tuple[ModelsConfig, dict[str, str]]:
+    """The models this dataset can support, and why the others are skipped.
+
+    A model is skipped when its features are unavailable (process features without proc.txt)
+    or, for a supervised model, when the supervised gate finds too few training labels. The
+    decision reads only the feature manifest (inputs and label counts of the training split),
+    never scores, so it cannot leak evaluation results. Every stage, the API and the exporter
+    use this same function, so they always agree on the model set.
+    """
+    path = feature_manifest_path(cfg)
+    if not path.exists():
+        return mcfg, {}
+    manifest = json.loads(path.read_text())
+    unavailable = set(manifest.get("unavailable_features", []))
+    train: dict[str, Any] = next(
+        (r for r in manifest.get("splits", []) if r["split"] == "train"), {}
+    )
+    skipped: dict[str, str] = {}
+    for model_id, spec in mcfg.models.items():
+        missing = sorted(set(mcfg.features_for(model_id)) & unavailable)
+        if missing:
+            skipped[model_id] = (
+                "Not trained: this dataset has no process log (proc.txt.gz), so "
+                + ", ".join(missing)
+                + " are unavailable."
+            )
+        elif spec.kind == "supervised_gbm":
+            ok, reason = supervised_gate_decision(
+                int(train.get("n_positive_windows", 0)),
+                int(train.get("n_positive_accounts", 0)),
+                mcfg,
+            )
+            if not ok:
+                skipped[model_id] = "Not trained (supervised gate): " + reason
+    if not skipped:
+        return mcfg, {}
+    kept = {m: spec for m, spec in mcfg.models.items() if m not in skipped}
+    ablations = {
+        a: ab for a, ab in mcfg.ablations.items() if ab.baseline in kept and ab.candidate in kept
+    }
+    return mcfg.model_copy(update={"models": kept, "ablations": ablations}), skipped
+
+
 def require(path: Path, hint: str) -> Path:
     if not path.exists():
         raise MissingInputError(f"missing {path}. {hint}")
@@ -121,6 +195,7 @@ def fingerprint_inputs(
         return {"ingest": fingerprint(cfg, "ingest"), "features": features, "graph": h(cfg.graph)}
     if mcfg is None:
         raise ValueError(f"stage {stage} needs the models config")
+    mcfg = active_models(cfg, mcfg)[0]
     if stage == "train":
         return {
             "features": fingerprint(cfg, "features"),
@@ -199,6 +274,7 @@ def run_ingest(cfg: DatasetConfig) -> dict[str, Any]:
             label_source=label_source(cfg.mode),
         )
         labels.write_parquet(labels_path(cfg))
+        proc_report = ingest_proc(cfg, out) if cfg.has_proc else None
         report = {
             "dataset": cfg.name,
             "mode": cfg.mode,
@@ -208,8 +284,11 @@ def run_ingest(cfg: DatasetConfig) -> dict[str, Any]:
             "auth": auth_report,
             "redteam": rt_report,
             "label_join": join_report,
+            **({"proc": proc_report} if proc_report else {}),
         }
         write_json(quality_report_path(cfg), report)
+        if proc_report:
+            rec["proc_rows_accepted"] = proc_report["rows_accepted"]
         rec["rows_accepted"] = auth_report["rows_accepted"]
         rec["rows_per_second"] = auth_report["rows_per_second"]
     return report
@@ -222,7 +301,8 @@ def run_features(cfg: DatasetConfig) -> dict[str, Any]:
     require_fresh(quality_report_path(cfg), cfg, "ingest")
     with stage_run(cfg, "features") as rec:
         labels = pl.read_parquet(labels_path(cfg))
-        feats = build_window_features(scan_auth(cfg), labels, cfg)
+        proc = scan_proc(cfg) if cfg.has_proc else None
+        feats = build_window_features(scan_auth(cfg), labels, cfg, proc)
         path = features_path(cfg)
         path.parent.mkdir(parents=True, exist_ok=True)
         feats.write_parquet(path)
@@ -237,6 +317,9 @@ def run_features(cfg: DatasetConfig) -> dict[str, Any]:
             "principal_scope": cfg.features.principals,
             "n_rows": feats.height,
             "features": FEATURE_DESCRIPTIONS,
+            "process_log": cfg.has_proc,
+            # Null in the table because their source is absent; models needing them are skipped.
+            "unavailable_features": [] if cfg.has_proc else list(PROCESS_FEATURES),
             "splits": split_summary(feats),
             "split_boundaries_seconds": cfg.splits.boundaries_seconds(),
         }
@@ -277,6 +360,7 @@ def _matrix(df: pl.DataFrame, features: list[str]) -> np.ndarray:
 def run_train(cfg: DatasetConfig, mcfg: ModelsConfig) -> dict[str, Any]:
     require(features_path(cfg), "Run scripts/build_features.py first.")
     require_fresh(features_path(cfg).parent / "feature_manifest.json", cfg, "features")
+    mcfg, skipped = active_models(cfg, mcfg)
     with stage_run(cfg, "train", mcfg) as rec:
         feats = pl.read_parquet(features_path(cfg))
         scored = feats.filter(pl.col("split").is_in(["train", "validation", "test"]))
@@ -302,12 +386,16 @@ def run_train(cfg: DatasetConfig, mcfg: ModelsConfig) -> dict[str, Any]:
         for model_id, spec in mcfg.models.items():
             feature_list = mcfg.features_for(model_id)
             model = build_model(model_id, spec, feature_list)
+            # Only supervised models see labels, and only the training split's.
+            y = train["label"].to_numpy().astype(int) if model.supervised else None
             model.fit(
                 _matrix(train, feature_list),
+                y=y,
                 train_info={
                     "train_split": "train",
                     "train_window_seconds": list(bounds["train"]),
-                    "labels_used": False,
+                    "labels_used": model.supervised,
+                    **({"n_positive_train_windows": int(y.sum())} if y is not None else {}),
                     "seed": cfg.seed,
                     "dataset": cfg.name,
                     "dataset_mode": cfg.mode,
@@ -327,7 +415,12 @@ def run_train(cfg: DatasetConfig, mcfg: ModelsConfig) -> dict[str, Any]:
         preds.write_parquet(predictions_path(cfg))
         write_json(
             train_manifest_path(cfg),
-            {"dataset": cfg.name, "models": list(summaries), **_stamp(cfg, "train", mcfg)},
+            {
+                "dataset": cfg.name,
+                "models": list(summaries),
+                "skipped_models": skipped,
+                **_stamp(cfg, "train", mcfg),
+            },
         )
         rec["models"] = list(summaries)
     return summaries
@@ -343,6 +436,8 @@ def load_models(cfg: DatasetConfig, mcfg: ModelsConfig) -> dict[str, AnomalyMode
 def run_evaluate(cfg: DatasetConfig, mcfg: ModelsConfig) -> dict[str, Any]:
     require(predictions_path(cfg), "Run scripts/train.py first.")
     require_fresh(train_manifest_path(cfg), cfg, "train", mcfg)
+    configured = mcfg.models
+    mcfg, skipped = active_models(cfg, mcfg)
     with stage_run(cfg, "evaluate", mcfg):
         preds = pl.read_parquet(predictions_path(cfg))
         models = load_models(cfg, mcfg)
@@ -353,6 +448,14 @@ def run_evaluate(cfg: DatasetConfig, mcfg: ModelsConfig) -> dict[str, Any]:
             "evaluation_assumptions": EVALUATION_ASSUMPTIONS,
             "split_boundaries_seconds": {s: list(bounds[s]) for s in ("train", *EVAL_SPLITS)},
             "models": {},
+            "skipped_models": {
+                m: {
+                    "display_name": configured[m].display_name,
+                    "kind": configured[m].kind,
+                    "reason": reason,
+                }
+                for m, reason in skipped.items()
+            },
         }
         for model_id, model in models.items():
             assert model.threshold is not None
@@ -411,22 +514,25 @@ def run_evaluate(cfg: DatasetConfig, mcfg: ModelsConfig) -> dict[str, Any]:
                 model, _matrix(alerted, model.features), seed=cfg.seed
             )
         train = preds.filter(pl.col("split") == "train")
-        gate = mcfg.supervised_gate
         n_pos = int(train["label"].sum())
         n_acc = train.filter(pl.col("label") == 1)["src_principal"].n_unique()
-        ok = n_pos >= gate.min_positive_windows and n_acc >= gate.min_positive_accounts
+        ok, reason = supervised_gate_decision(n_pos, n_acc, mcfg)
+        supervised = [m for m, spec in mcfg.models.items() if spec.kind == "supervised_gbm"]
         result["supervised_model"] = {
-            "trained": False,
+            "trained": bool(supervised),
+            "model_ids": supervised,
             "labels_permit": ok,
             "train_positive_windows": n_pos,
             "train_positive_accounts": n_acc,
-            "required": gate.model_dump(),
+            "required": mcfg.supervised_gate.model_dump(),
             "reason": (
-                f"The training split has {n_pos} known red-team windows from {n_acc} accounts; "
-                f"a supervised model needs at least {gate.min_positive_windows} from "
-                f"{gate.min_positive_accounts}."
-                if not ok
-                else "Labels would permit a supervised model; none is configured yet."
+                reason
+                + " "
+                + (
+                    f"Trained as {', '.join(supervised)} on the training split's labels."
+                    if supervised
+                    else "No supervised model was trained."
+                )
             ),
         }
         scored = feats.join(
@@ -438,7 +544,16 @@ def run_evaluate(cfg: DatasetConfig, mcfg: ModelsConfig) -> dict[str, Any]:
                 "provenance": result["provenance"],
                 **drift_report(
                     scored,
-                    mcfg.features,
+                    [
+                        f
+                        for f in mcfg.features
+                        if f
+                        not in set(
+                            json.loads(feature_manifest_path(cfg).read_text()).get(
+                                "unavailable_features", []
+                            )
+                        )
+                    ],
                     {mid: float(models[mid].threshold) for mid in models},  # type: ignore[arg-type]
                     mcfg.threshold_policy.alert_rate,
                     expected={

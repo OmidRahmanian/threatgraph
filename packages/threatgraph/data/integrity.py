@@ -23,9 +23,17 @@ import pyarrow.compute as pc
 import pyarrow.csv as pacsv
 
 from threatgraph.config import DatasetConfig
-from threatgraph.data.schema import AUTH_SOURCE_COLUMNS, REDTEAM_SOURCE_COLUMNS
+from threatgraph.data.schema import (
+    AUTH_SOURCE_COLUMNS,
+    PROC_SOURCE_COLUMNS,
+    REDTEAM_SOURCE_COLUMNS,
+)
 
-COLUMNS = {"auth": AUTH_SOURCE_COLUMNS, "redteam": REDTEAM_SOURCE_COLUMNS}
+COLUMNS = {
+    "auth": AUTH_SOURCE_COLUMNS,
+    "redteam": REDTEAM_SOURCE_COLUMNS,
+    "proc": PROC_SOURCE_COLUMNS,
+}
 QUICK_LINES = 10_000
 
 
@@ -128,7 +136,7 @@ def verify_raw(cfg: DatasetConfig, *, full: bool = False, sha256: bool = False) 
     previous = json.loads(out.read_text()) if out.exists() else {}
     files: dict[str, Any] = {}
     ok = True
-    for kind in ("auth", "redteam"):
+    for kind in [k for k in COLUMNS if k in cfg.files]:
         path = cfg.raw_file(kind)
         info: dict[str, Any] = {"name": path.name, "present": path.exists()}
         if not path.exists():

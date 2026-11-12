@@ -1,5 +1,7 @@
-# Model registry. Every model is trained on the train split only (no labels used by the
-# unsupervised models), and its alert threshold is calibrated on the validation split.
+# Model registry. Every model is trained on the train split only (labels are used only by the
+# gated supervised model M2), and its alert threshold is calibrated on the validation split.
+# A model is skipped, with the reason recorded in metrics.json, when the dataset lacks its
+# inputs (process features need proc.txt) or, for M2, when training labels are too few.
 
 feature_set: auth_window_v2
 
@@ -27,6 +29,18 @@ feature_groups:
   graph:
     - n_rare_dst
     - n_pivot_src
+  # Process starts from the optional LANL proc.txt (Phase 5 extension).
+  process:
+    - n_proc_start
+    - n_distinct_proc
+    - n_novel_proc
+    - n_rare_proc
+    - n_proc_hosts
+    - n_proc_after_remote
+  # Causal spectral embeddings of the earlier account-computer graph (no PyTorch).
+  graph_embedding:
+    - emb_dst_surprise_max
+    - emb_dst_surprise_mean
 
 threshold_policy:
   # Alert budget: flag the top `alert_rate` fraction of validation windows. Labels are not
@@ -51,6 +65,50 @@ models:
       max_features: 1.0
       random_state: 42
 
+  m2_supervised_gbm:
+    kind: supervised_gbm
+    display_name: "M2 · Gradient boosting (supervised, gated)"
+    description: >-
+      Gradient-boosted trees on the same inputs as M3, trained on the training split's
+      red-team labels with class re-weighting. Unlabeled windows count as negatives for
+      fitting only. Trained only when the supervised gate finds enough training labels.
+    features: [behavioral, graph]
+    params:
+      max_iter: 200
+      learning_rate: 0.05
+      max_leaf_nodes: 15
+      min_samples_leaf: 20
+      l2_regularization: 1.0
+      random_state: 42
+
+  m4_isolation_forest_process:
+    kind: isolation_forest
+    display_name: "M4 · Isolation Forest + graph + process features"
+    description: >-
+      M3 plus six process features from proc.txt: starts, distinct and never-before-seen
+      programs, programs no other account had run, hosts, and starts right after a lateral
+      logon. Same hyperparameters and seed as M3; no labels.
+    features: [behavioral, graph, process]
+    params:
+      n_estimators: 300
+      max_samples: 256
+      max_features: 1.0
+      random_state: 42
+
+  m5_isolation_forest_embedding:
+    kind: isolation_forest
+    display_name: "M5 · Isolation Forest + graph embeddings"
+    description: >-
+      M3 plus two graph-embedding features: how far the computers an account reached lie from
+      the account in a spectral embedding of all earlier days. Same hyperparameters and seed
+      as M3; no labels.
+    features: [behavioral, graph, graph_embedding]
+    params:
+      n_estimators: 300
+      max_samples: 256
+      max_features: 1.0
+      random_state: 42
+
   m3_isolation_forest_graph:
     kind: isolation_forest
     display_name: "M3 · Isolation Forest + graph features"
@@ -58,7 +116,7 @@ models:
       The same Isolation Forest as M1 (same hyperparameters and seed) with two graph features
       added: destinations no other account had used before, and source computers the account
       had itself just reached (two-hop pivots). Trained on the training split without labels.
-    features: all
+    features: [behavioral, graph]
     params:
       n_estimators: 300
       max_samples: 256
@@ -75,6 +133,25 @@ ablations:
       is not blind: the fixture's red-team campaigns were written to hop from host to host, and
       the pivot feature was designed knowing that. A gain here shows the feature works as
       intended on data built to contain pivots, not that it would help on real data.
+
+  process_features:
+    title: "Process-feature ablation: M3 vs M4"
+    baseline: m3_isolation_forest_graph
+    candidate: m4_isolation_forest_process
+    note: >-
+      M4 differs from M3 only by the process feature group. On the synthetic demo this is not
+      blind: most red-team hops were written to start tools, although the fixture also
+      contains benign new programs (a software rollout, admin tools on swept hosts, new hires)
+      and a stealth campaign that runs only usual programs.
+
+  graph_embeddings:
+    title: "Graph-embedding ablation: M3 vs M5"
+    baseline: m3_isolation_forest_graph
+    candidate: m5_isolation_forest_embedding
+    note: >-
+      M5 differs from M3 only by two embedding features. They were not designed around the
+      fixture's campaigns, but the fixture's attackers do reach hosts outside the victim's
+      usual neighbourhood, which the embedding distance measures.
 
 # Account cluster bootstrap for confidence intervals on every held-out metric.
 uncertainty: { n_boot: 1000, level: 0.95, seed: 42 }

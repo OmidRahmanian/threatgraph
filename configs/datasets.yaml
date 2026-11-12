@@ -12,6 +12,7 @@ datasets:
     files:
       auth: auth.txt.gz
       redteam: redteam.txt.gz
+      proc: proc.txt.gz
     processed_dir: data/processed/demo
     artifacts_dir: artifacts/demo
     time_window: { start_seconds: 0, end_seconds: null }
@@ -32,6 +33,9 @@ datasets:
     files:
       auth: auth.txt.gz
       redteam: redteam.txt.gz
+      # Optional: uncomment after downloading proc.txt.gz from the same LANL page to enable the
+      # process features and model M4. Without it, M4 is skipped with the reason recorded.
+      # proc: proc.txt.gz
     processed_dir: data/processed/lanl
     artifacts_dir: artifacts/lanl
     # Bounded subset. Run `python scripts/ingest_lanl.py --inspect-redteam` first to see which

@@ -10,7 +10,8 @@ ThreatGraph AI has two clearly separated modes that share one codebase:
 - **Research Mode.** Historical authentication events in the format of the **LANL
   Comprehensive, Multi-Source Cyber-Security Events** dataset (Kent, 2015). It builds causal
   per-account behavioral and graph features, scores each account-hour with a statistical
-  baseline and two Isolation Forests (with and without graph features), evaluates them on a
+  baseline, Isolation Forests with and without graph, process and graph-embedding features,
+  and a label-gated supervised model, evaluates them on a
   strict chronological split against red-team labels, and shows the results in a web app.
   You can move the alert threshold, see metrics recompute from the stored held-out scores,
   inspect the raw events behind any alert, explore which computers an alerted account moved
@@ -131,9 +132,10 @@ Details, the real-data-mode guarantees and a scale rehearsal: [docs/real_data.md
 | Account cluster-bootstrap confidence intervals and paired model differences | ✅ implemented |
 | Explanation faithfulness study (feature deletion test) | ✅ implemented |
 | Supervised-model label-availability gate | ✅ implemented; decision and reason recorded in metrics.json |
-| Trained supervised model (M2) | ⏳ optional, not implemented; the current demo has too few training labels |
-| Flows/DNS/process log ingestion and features | ⏳ optional, not implemented |
-| GNN benchmark | ⏳ optional, not implemented; see [modeling notes](docs/modeling.md) |
+| Supervised model M2 (class-weighted gradient boosting on training-split labels only) | ✅ implemented and tested; switched off on the demo by the label gate (8 training windows from 2 accounts, needs 30 from 5), and trained automatically when labels permit |
+| Process-log (`proc.txt`) ingestion, six causal process features, M4 and the M3-vs-M4 ablation | ✅ implemented and tested on the synthetic fixture; on the demo M4 does not beat M3 ([why](docs/modeling.md#m4--isolation-forest--graph--process-features)) |
+| Graph-embedding benchmark: causal daily spectral embeddings, M5 and the M3-vs-M5 ablation (no PyTorch) | ✅ implemented and tested; a message-passing GNN is not implemented ([modeling notes](docs/modeling.md)) |
+| Flow and DNS log ingestion | ⏳ optional, not implemented (they record computers, not accounts) |
 | Chunked features/graph, split suggestion, capped score tables, real-data-mode test, scale rehearsal | ✅ implemented; real LANL memory use remains unverified |
 | Run on official LANL data | ⏳ importer implemented; actual evaluation awaits user-downloaded files |
 | Raw-file integrity check (gzip completeness, columns, sorted time, sha256 vs last run), `lanl_smoke` window | ✅ implemented and tested on fixtures |
@@ -148,10 +150,9 @@ Details, the real-data-mode guarantees and a scale rehearsal: [docs/real_data.md
 | **Live:** private dashboard `/threatgraph/live` (sign-in, health, availability, traffic, incidents, timeline) | ✅ checked in a browser on desktop and mobile |
 | **Live:** Compose `live` profile, Caddy TLS, hardened containers, agent systemd unit, backups | ✅ verified locally (colima); not deployed to a VPS |
 
-Phases 1 to 4 are complete. Phase 5 is complete where the data allows; its optional
-extensions (supervised model, flows/DNS/process logs, GNN) are listed above as not
-implemented. The real LANL evaluation stays pending until the official files are downloaded
-through LANL's form and the pipeline is run on them.
+Phases 1 to 5 are complete, apart from flow and DNS logs and a PyTorch GNN. The real LANL
+evaluation stays pending until the official files are downloaded through LANL's form and the
+pipeline is run on them; M2 and M4 then train automatically if the real data supports them.
 
 ## Architecture
 

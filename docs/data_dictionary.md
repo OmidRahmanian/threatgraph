@@ -6,12 +6,28 @@
 |---|---|
 | `auth.txt.gz` | time, source user@domain, destination user@domain, source computer, destination computer, authentication type, logon type, authentication orientation, success/failure |
 | `redteam.txt.gz` | time, user@domain, source computer, destination computer |
+| `proc.txt.gz` (optional) | time, user@domain, computer, process name, Start/End |
 
 `time` is integer seconds from an arbitrary epoch: there is no calendar date and no known
 clock time. `?` marks a missing value. Identifiers (`U123@DOM1`, `C17693`, `C17693$@DOM1`
 for machine accounts) are de-identified pseudonyms, preserved verbatim.
 
-Only `auth` and `redteam` are ingested so far. `flows`, `dns` and `proc` are planned (Phase 5).
+`auth` and `redteam` are always ingested; `proc` is ingested when `files.proc` is set for the
+dataset (it is for the synthetic demo). `flows` and `dns` are not ingested.
+
+## Process events (`proc/day=*/part-*.parquet`, optional)
+
+| Column | Type | Notes |
+|---|---|---|
+| `event_time_seconds` | int64 | relative seconds |
+| `principal` | string | user@domain (machine accounts end in `$@DOMAIN`) |
+| `computer` | string | null when `?` |
+| `process` | string | de-identified process name (`P123`) |
+| `action` | string | `Start` or `End` |
+
+Rows are rejected (and counted per reason in the data-quality report under `proc`) for a
+non-integer or negative time, an action other than Start/End, a missing principal or process,
+or a wrong column count.
 
 ## Validation rules (auth)
 

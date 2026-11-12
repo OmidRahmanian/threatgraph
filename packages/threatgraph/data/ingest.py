@@ -27,6 +27,9 @@ from threatgraph.data.schema import (
     AUTH_OUTCOMES,
     AUTH_SOURCE_COLUMNS,
     MISSING_TOKEN,
+    PROC_ACTIONS,
+    PROC_EVENT_SCHEMA,
+    PROC_SOURCE_COLUMNS,
     REDTEAM_SCHEMA,
     REDTEAM_SOURCE_COLUMNS,
 )
@@ -247,6 +250,127 @@ def _auth_table_stats(auth_dir: Path) -> dict[str, Any]:
             "computers_total": computers[0],
         },
         "rows_by_orientation": {str(k): v for k, v in by_family},
+    }
+
+
+def proc_glob(processed: Path) -> str:
+    return str(processed / "proc" / "**" / "*.parquet")
+
+
+def ingest_proc(cfg: DatasetConfig, out_dir: Path) -> dict[str, Any]:
+    """Stream the optional LANL `proc.txt` file (process start/end) into day partitions.
+
+    Same guarantees as the auth importer: bounded memory, every rejected row counted with its
+    reason, the configured time window, and an early stop past the window end when the file is
+    time-sorted.
+    """
+    src = cfg.raw_file("proc")
+    if not src.exists():
+        raise FileNotFoundError(src)
+    proc_dir = out_dir / "proc"
+    if proc_dir.exists():
+        for p in sorted(proc_dir.rglob("*.parquet")):
+            p.unlink()
+    rejects = RejectLog()
+    window = cfg.time_window
+    rows_read = accepted = outside = 0
+    missing: Counter[str] = Counter()
+    started = time.perf_counter()
+    stopped_early = False
+    for batch_idx, raw in enumerate(
+        iter_csv_batches(src, PROC_SOURCE_COLUMNS, cfg.ingest.block_size_bytes, rejects)
+    ):
+        rows_read += raw.height
+        df = raw.with_columns(
+            pl.col("time").str.strip_chars().cast(pl.Int64, strict=False).alias("_t")
+        )
+        reason = (
+            pl.when(pl.col("_t").is_null())
+            .then(pl.lit("non_integer_time"))
+            .when(pl.col("_t") < 0)
+            .then(pl.lit("negative_time"))
+            .when(~pl.col("action").is_in(list(PROC_ACTIONS)))
+            .then(pl.lit("invalid_action"))
+            .when(pl.col("principal").is_in([MISSING_TOKEN, ""]))
+            .then(pl.lit("missing_principal"))
+            .when(pl.col("process").is_in([MISSING_TOKEN, ""]))
+            .then(pl.lit("missing_process"))
+            .otherwise(None)
+        )
+        df = df.with_columns(reason.alias("_reason"))
+        for r in df.filter(pl.col("_reason").is_not_null()).iter_rows(named=True):
+            rejects.add(r["_reason"], ",".join(str(r[c]) for c in PROC_SOURCE_COLUMNS))
+        good = (
+            _null_missing(df.filter(pl.col("_reason").is_null()), ["computer"])
+            .select(
+                pl.col("_t").alias("event_time_seconds"),
+                (pl.col("_t") // DAY_SECONDS).cast(pl.Int32).alias("day"),
+                "principal",
+                "computer",
+                "process",
+                "action",
+            )
+            .cast(PROC_EVENT_SCHEMA)  # type: ignore[arg-type]
+        )
+        in_window = good.filter(
+            (pl.col("event_time_seconds") >= window.start_seconds)
+            & (
+                pl.lit(True)
+                if window.end_seconds is None
+                else pl.col("event_time_seconds") <= window.end_seconds
+            )
+        )
+        outside += good.height - in_window.height
+        if in_window.height:
+            missing["computer"] += in_window["computer"].null_count()
+            for (day,), part in in_window.partition_by(
+                "day", as_dict=True, maintain_order=True
+            ).items():
+                d = proc_dir / f"day={int(day):05d}"
+                d.mkdir(parents=True, exist_ok=True)
+                part.drop("day").write_parquet(
+                    d / f"part-{batch_idx:06d}.parquet", compression="zstd"
+                )
+            accepted += in_window.height
+        if (
+            cfg.ingest.assume_sorted
+            and window.end_seconds is not None
+            and good.height
+            and good["event_time_seconds"].min() > window.end_seconds  # type: ignore[operator]
+        ):
+            stopped_early = True
+            break
+    elapsed = time.perf_counter() - started
+    stats: dict[str, Any] = {}
+    if accepted:
+        con = duckdb.connect()
+        row = con.execute(
+            "SELECT min(event_time_seconds), max(event_time_seconds), count(DISTINCT principal), "
+            "count(DISTINCT computer), count(DISTINCT process), "
+            "count(*) FILTER (WHERE action = 'Start') "
+            f"FROM read_parquet('{proc_glob(out_dir)}', hive_partitioning=true)"
+        ).fetchone()
+        con.close()
+        assert row is not None
+        stats = {
+            "time_min_seconds": row[0],
+            "time_max_seconds": row[1],
+            "distinct": {"principal": row[2], "computer": row[3], "process": row[4]},
+            "starts": row[5],
+        }
+    return {
+        "source_file": _file_info(src, cfg.ingest.hash_source_files),
+        "rows_read": rows_read + rejects.counts["wrong_column_count"],
+        "rows_rejected": rejects.total,
+        "rejected_by_reason": dict(sorted(rejects.counts.items())),
+        "rejection_examples": rejects.examples,
+        "rows_outside_time_window": outside,
+        "rows_accepted": accepted,
+        "stopped_early_at_window_end": stopped_early,
+        "missing_by_column": dict(missing),
+        "ingest_seconds": round(elapsed, 3),
+        "rows_per_second": round((rows_read / elapsed) if elapsed else 0.0, 1),
+        **stats,
     }
 
 

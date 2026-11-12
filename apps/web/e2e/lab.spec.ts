@@ -79,13 +79,26 @@ test("no horizontal page scroll", async ({ page }) => {
   }
 });
 
-test("the lab shows the graph-feature ablation from stored metrics", async ({ page }) => {
-  const ablation = read("models.json").ablations[0];
+test("the lab shows every feature ablation from stored metrics", async ({ page }) => {
+  const ablations = read("models.json").ablations as { title: string; splits: { split: string; candidate: { average_precision: number } }[] }[];
+  expect(ablations.map((a) => a.title)).toEqual(expect.arrayContaining([expect.stringContaining("Graph-feature ablation")]));
   await page.goto("/threatgraph/lab/");
-  const table = page.getByTestId("ablation-table");
-  await expect(table).toBeVisible();
-  const test = ablation.splits.find((s: { split: string }) => s.split === "test");
-  await expect(table.locator("tbody tr").nth(1)).toContainText(test.candidate.average_precision.toFixed(3));
+  for (const ablation of ablations) {
+    const panel = page.locator("section", { has: page.getByRole("heading", { name: ablation.title }) });
+    const table = panel.getByTestId("ablation-table");
+    await expect(table).toBeVisible();
+    const test = ablation.splits.find((s) => s.split === "test")!;
+    await expect(table.locator("tbody tr").nth(1)).toContainText(test.candidate.average_precision.toFixed(3));
+  }
+});
+
+test("models the dataset cannot support are listed with the reason, not shown as results", async ({ page }) => {
+  const models = read("models.json") as { models: { model_id: string }[]; skipped_models?: { model_id: string; kind: string }[]; supervised_model: { trained: boolean; reason: string } };
+  await page.goto("/threatgraph/lab/");
+  await expect(page.getByTestId("supervised-note")).toContainText(models.supervised_model.reason.slice(0, 40));
+  for (const s of models.skipped_models ?? []) {
+    expect(models.models.map((m) => m.model_id)).not.toContain(s.model_id);
+  }
 });
 
 test("intervals, drift and explanation faithfulness come from the bundle", async ({ page }) => {

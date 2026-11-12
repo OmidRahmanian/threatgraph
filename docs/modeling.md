@@ -4,7 +4,8 @@
 
 Labels are rare (tens of red-team events among hundreds of thousands) and incomplete (the
 red-team file documents *some* malicious authentications). So the primary models are
-**unsupervised rankers** trained without labels. Labels are used only for evaluation. A score
+**unsupervised rankers** trained without labels, and labels are used for evaluation. The one
+exception, M2, is trained on training-split labels only and only when there are enough of them. A score
 answers "how unusual is this account-hour compared with the training period?", not "what is
 the probability of compromise?".
 
@@ -64,21 +65,60 @@ whose campaigns pivot from host to host. They were checked on the demo while bei
 so the demo ablation is not blind. M0 and M1 were not changed: their metrics are identical
 before and after the graph features were added (verified when M3 was introduced).
 
-### M2 · supervised model: gated, not trained
+### M2 · Gradient boosting (supervised, gated)
 
-A supervised model is trained only when the training split holds at least
-`supervised_gate.min_positive_windows` known red-team windows from
-`min_positive_accounts` accounts (30 and 5; fixed in `configs/models.yaml` before looking at
-results). The demo has far fewer, so `metrics.json` records the decision and the reason
-instead of a model. If real data passes the gate, the model must keep train and validation
-positives disjoint in time, never using a random event-level split.
+`HistGradientBoostingClassifier` (scikit-learn) on the same inputs as M3, with balanced class
+weights and fixed hyperparameters from `configs/models.yaml` (never tuned on validation or
+test). It is fitted on the **training split's labels only**; `AnomalyModel.fit` refuses labels
+for unsupervised models and requires them for supervised ones, and a test flips every
+validation and test label and checks that M2's scores do not change.
 
-### Not implemented (Phase 5, optional)
+Unlabeled windows count as negatives *for fitting* (the usual positive-unlabeled shortcut).
+That biases M2 against undocumented attacker activity, which is why evaluation still treats
+unlabeled windows as unknown, exactly as for the other models. Its score is a ranking, not a
+calibrated probability.
 
-- Flow, DNS and process logs: LANL publishes them, but they need the same user download and
-  the synthetic fixture has none.
-- A graph neural network benchmark: a heavy dependency for a comparison that a handful of
-  labeled accounts cannot support.
+M2 exists only when the training split holds at least `supervised_gate.min_positive_windows`
+known red-team windows from `min_positive_accounts` accounts (30 and 5, fixed before looking
+at results). The decision reads the feature manifest's label counts, never scores. On the
+synthetic demo the training split has 8 such windows from 2 accounts, so M2 is **not trained
+there**; `metrics.json` and the Lab say so. A test lowers the gate on the fixture to exercise
+the full train, evaluate and serve path.
+
+### M4 · Isolation Forest + graph + process features
+
+M3's inputs plus the `process` group, computed from LANL's optional `proc.txt`
+(`packages/threatgraph/data/process_features.py`): process starts, distinct programs, programs
+the account never ran before, programs no other account had run before the window, hosts, and
+starts within 5 minutes of a lateral logon to that host. Same estimator, hyperparameters and
+seed as M3, so M3 vs M4 is a clean ablation.
+
+When a dataset has no proc file, the process features are stored as null (never as zeros),
+M4 is skipped, and the reason is recorded in `metrics.json` and shown in the Lab.
+
+**Development disclosure and result.** The synthetic fixture was written so most red-team hops
+start tools, but also with benign novelty: a software rollout on day 9.3 (validation period),
+admin tools on every swept host, and new hires. On the demo M4 does **not** improve on M3
+(test AP 0.199 vs 0.248, with overlapping bootstrap intervals): the benign new programs add as
+much unusualness as the attacks. The features and fixture were not changed after seeing this.
+
+### M5 · Isolation Forest + graph embeddings (lightweight GNN alternative)
+
+M3's inputs plus two `graph_embedding` features (`packages/threatgraph/graph/embedding.py`).
+For each relative day, a truncated SVD (16 dimensions, fixed seed) factorizes the account x
+destination-computer graph of **all earlier days**; a window's features are the largest and
+mean `1 - cosine` distance between the account and the computers it reached. The embedding for
+day d uses only events before day d, so the features pass the same truncation causality test
+as the others. Accounts or computers absent from the earlier graph contribute 0 (the novelty
+features already count them). On the demo M5 and M3 are within noise (test AP 0.260 vs 0.248).
+
+### Not implemented (optional)
+
+- **A message-passing GNN.** It needs PyTorch (a large dependency) and labels for a
+  supervised GNN that a handful of labeled accounts cannot support. M5 covers the
+  graph-representation idea without it.
+- **Flow and DNS logs.** LANL publishes them, but they record computers, not accounts, so they
+  need a computer-to-account attribution step before they fit the account-hour unit.
 
 ## Threshold policy
 

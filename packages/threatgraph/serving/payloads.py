@@ -21,6 +21,7 @@ from threatgraph.graph.query import EntityType, subgraph
 from threatgraph.ml.models import AnomalyModel
 from threatgraph.pipeline import (
     EVAL_SPLITS,
+    active_models,
     drift_path,
     features_path,
     graph_dir,
@@ -108,7 +109,8 @@ class ServingContext:
 
     def __init__(self, cfg: DatasetConfig, mcfg: ModelsConfig, *, public_ids: bool = False):
         self.cfg = cfg
-        self.mcfg = mcfg
+        # Only the models this dataset supports (same rule as training and evaluation).
+        self.mcfg = active_models(cfg, mcfg)[0]
         self.alias_ids = public_ids and cfg.mode == "lanl"
         hint = f"Run `python scripts/run_pipeline.py --dataset {cfg.name}` first."
         for p in (
@@ -127,6 +129,12 @@ class ServingContext:
     @cached_property
     def quality(self) -> dict[str, Any]:
         return json.loads(quality_report_path(self.cfg).read_text())
+
+    @cached_property
+    def available_features(self) -> list[str]:
+        """Features this dataset has (process features need the optional proc log)."""
+        missing = set(self.feature_manifest.get("unavailable_features", []))
+        return [f for f in FEATURE_DESCRIPTIONS if f not in missing]
 
     @cached_property
     def metrics(self) -> dict[str, Any]:
@@ -282,6 +290,7 @@ class ServingContext:
             features=[
                 S.FeatureInfo(name=k, description=v, group=self._feature_group.get(k, "other"))
                 for k, v in FEATURE_DESCRIPTIONS.items()
+                if k in self.available_features
             ],
             model_ids=list(self.mcfg.models),
             implemented_views=IMPLEMENTED_VIEWS,
@@ -415,6 +424,10 @@ class ServingContext:
             ablations=self.ablations(),
             bootstrap=self.metrics["uncertainty"],
             supervised_model=self.metrics["supervised_model"],
+            skipped_models=[
+                S.SkippedModel(model_id=m, **info)
+                for m, info in self.metrics.get("skipped_models", {}).items()
+            ],
         )
 
     def drift(self) -> S.Drift:
@@ -581,7 +594,7 @@ class ServingContext:
             method=model.explanation_method,
             caveat=model.explanation_caveat,
             diagnostics=[S.FeatureDiagnostic(**d) for d in model.diagnostics(x)],
-            feature_values={f: float(r[f]) for f in FEATURE_DESCRIPTIONS},
+            feature_values={f: float(r[f]) for f in self.available_features},
             n_events_in_window=window_events.height,
             evidence_events=self._event_rows(shown, used),
             evidence_truncated=window_events.height > MAX_EVIDENCE,

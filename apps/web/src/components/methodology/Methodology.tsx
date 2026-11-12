@@ -159,7 +159,14 @@ function FeatureSection({ meta }: { meta: Metadata }) {
 function ModelSection({ models }: { models: ModelList }) {
   return (
     <Panel id="models">
-      <SectionTitle title="Models" subtitle="All are unsupervised: labels are never used for training or for setting thresholds." />
+      <SectionTitle
+        title="Models"
+        subtitle={
+          models.supervised_model.trained
+            ? "Unsupervised models never see labels; the supervised model learns from training-split labels only. Thresholds are always set on validation."
+            : "All models shown are unsupervised: labels are never used for training or for setting thresholds."
+        }
+      />
       <div className="space-y-4">
         {models.models.map((m) => (
           <div key={m.model_id} className="text-sm">
@@ -236,9 +243,10 @@ function ResearchSection({ models }: { models: ModelList }) {
           fixed in configuration before results are seen.
         </p>
         <p>
-          <strong className="text-ink">Not built:</strong> flow, DNS and process logs (LANL publishes them, but they need the same
-          user download, and the synthetic fixture has none) and a graph neural network benchmark (a heavy dependency for a
-          comparison that a handful of labeled accounts could not support).
+          <strong className="text-ink">Not built:</strong> flow and DNS logs (they record computers, not accounts, so they need an
+          attribution step first) and a message-passing graph neural network (a heavy PyTorch dependency). The graph-embedding
+          model stands in for the graph-representation idea without it. Configured models a dataset cannot support (no process
+          log, too few training labels) are skipped with the reason shown in the Experiment Lab.
         </p>
       </Prose>
     </Panel>

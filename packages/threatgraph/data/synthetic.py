@@ -1,4 +1,5 @@
-"""Deterministic synthetic fixture in the exact LANL `auth.txt` / `redteam.txt` text formats.
+"""Deterministic synthetic fixture in the exact LANL `auth.txt`, `redteam.txt` and `proc.txt`
+text formats.
 
 Everything here is invented. The fixture exists so the full pipeline (parser, features,
 models, API, website) can run without the real LANL download, and it is labeled
@@ -11,6 +12,14 @@ evaluation non-trivial:
   successful hops), so "unlabeled" never means "benign";
 * data-quality problems the parser must survive: malformed rows, `?` fields, duplicate
   auth lines, a duplicate red-team record, and a red-team record with no matching event.
+
+Process starts (`proc.txt.gz`) are drawn after the authentication events from their own
+random stream, so adding them leaves the auth file byte-identical. Users start habitual
+programs after their logons; admins carry admin tools to every host they touch (including
+maintenance sweeps); a software rollout puts a brand-new program on many workstations in one
+day; most red-team hops start tools, some reused across campaigns, while the stealth campaign
+starts only the victim's usual programs. Benign novelty therefore exists on purpose, and the
+process features are not a perfect separator.
 """
 
 from __future__ import annotations
@@ -64,6 +73,7 @@ class SyntheticSpec:
     )
     label_keep_probability: float = 0.85
     n_random_duplicate_lines: int = 40
+    software_rollout_day: float = 9.3
 
 
 @dataclass
@@ -94,6 +104,7 @@ class _Generator:
         self.labeled: list[tuple[int, str, str, str]] = []
         self.campaign_log: list[dict[str, Any]] = []
         self.benign_log: list[dict[str, Any]] = []
+        self.hops: list[tuple[int, str, str, str]] = []  # (time, principal, dst, style)
         self._build_entities()
 
     # ------------------------------------------------------------------ entities
@@ -376,6 +387,7 @@ class _Generator:
                 t += 1
                 row = self.emit(t, victim.principal, src, dst, auth, "Network", "LogOn", "Success")
                 if row is not None:
+                    self.hops.append((t, victim.principal, dst, c.style))
                     if rng.random() < s.label_keep_probability:
                         self.labeled.append((t, victim.principal, src, dst))
                         labeled_n += 1
@@ -397,6 +409,83 @@ class _Generator:
                     "unlabeled_failures": failures,
                 }
             )
+
+    # ------------------------------------------------------------------ processes
+    def processes(self, rows: list[Row]) -> list[str]:
+        """Process start/end lines (LANL proc.txt format) derived from the auth events."""
+        prng = np.random.default_rng(self.spec.seed + 1)  # separate stream: auth unchanged
+        common = [f"P{i}" for i in range(1, 61)]
+        weights = 1.0 / np.arange(1, 61) ** 1.1
+        weights /= weights.sum()
+        system = [f"P{i}" for i in range(1, 13)]
+        admin_tools = [f"P{i}" for i in range(70, 80)]
+        attacker_tools = [f"P{i}" for i in range(4401, 4407)]
+        habits: dict[str, list[str]] = {}
+        for u in self.users:
+            k = int(prng.integers(3, 8))
+            h = list(prng.choice(common, size=k, replace=False, p=weights))
+            if u.role == "admin":
+                h += list(prng.choice(admin_tools, size=4, replace=False))
+            habits[u.principal] = h
+        roles = {u.principal: u.role for u in self.users}
+        out: list[tuple[int, str, str, str, str]] = []
+
+        def start(t: int, user: str, comp: str, proc: str) -> None:
+            if not 0 <= t < self.end:
+                return
+            out.append((t, user, comp, proc, "Start"))
+            if prng.random() < 0.6:
+                t_end = t + int(prng.integers(5, 3600))
+                if t_end < self.end:
+                    out.append((t_end, user, comp, proc, "End"))
+
+        for t, user, _, src, dst, _a, _l, orient, outcome in rows:
+            if "$@" in user:
+                if prng.random() < 0.3:
+                    start(t + int(prng.integers(1, 60)), user, src, str(prng.choice(system)))
+                continue
+            if orient != "LogOn" or outcome != "Success" or user not in habits:
+                continue
+            if prng.random() < (0.5 if roles.get(user) == "admin" else 0.35):
+                for _ in range(1 + prng.poisson(0.5)):
+                    start(t + int(prng.integers(1, 120)), user, dst, str(prng.choice(habits[user])))
+
+        # Benign look-alike: a software rollout puts a new program on many workstations.
+        t0 = int(self.spec.software_rollout_day * DAY_SECONDS)
+        rolled = [u for u in self.normal_users if prng.random() < 0.4]
+        for u in rolled:
+            start(t0 + int(prng.integers(0, 3 * HOUR)), u.principal, self._home_at(u, t0), "P900")
+        self.benign_log.append(
+            {
+                "kind": "software_rollout",
+                "process": "P900",
+                "start_seconds": t0,
+                "n_users": len(rolled),
+            }
+        )
+
+        # Red-team hops: tools started shortly after the lateral logon (stealth: usual ones).
+        for t, user, dst, style in self.hops:
+            if style == "stealth":
+                if prng.random() < 0.5:
+                    start(t + int(prng.integers(5, 90)), user, dst, str(prng.choice(habits[user])))
+            elif prng.random() < 0.75:
+                for _ in range(int(prng.integers(1, 4))):
+                    start(
+                        t + int(prng.integers(5, 90)), user, dst, str(prng.choice(attacker_tools))
+                    )
+
+        out.sort(key=lambda r: (r[0], r[1], r[2], r[3], r[4]))
+        lines = [",".join(str(x) for x in r) for r in out]
+        malformed = [
+            "{t},?,C1,P1,Start",  # missing principal
+            "{t},U1@DOM1,C1,P1,Restart",  # invalid action
+            "{t},U1@DOM1,C1,P1",  # too few columns
+        ]
+        for k, line in enumerate(malformed):
+            pos = (k + 1) * len(lines) // (len(malformed) + 1)
+            lines.insert(pos, line.format(t=lines[pos].split(",")[0]))
+        return lines
 
 
 def _sha256(path: Path) -> str:
@@ -457,10 +546,14 @@ def generate_fixture(out_dir: Path, spec: SyntheticSpec | None = None) -> Fixtur
     rt_lines.append(f"{t_u + 7},{u_u},{s_u},{d_u}")  # record with no matching auth event
     rt_lines.sort(key=lambda line: int(line.split(",")[0]))
 
+    proc_lines = gen.processes(rows)
+
     out_dir.mkdir(parents=True, exist_ok=True)
     auth_path, rt_path = out_dir / "auth.txt.gz", out_dir / "redteam.txt.gz"
+    proc_path = out_dir / "proc.txt.gz"
     _write_gz(auth_path, out)
     _write_gz(rt_path, rt_lines)
+    _write_gz(proc_path, proc_lines)
 
     manifest = {
         "synthetic": True,
@@ -470,6 +563,7 @@ def generate_fixture(out_dir: Path, spec: SyntheticSpec | None = None) -> Fixtur
         "files": {
             "auth.txt.gz": {"lines": len(out), "sha256": _sha256(auth_path)},
             "redteam.txt.gz": {"lines": len(rt_lines), "sha256": _sha256(rt_path)},
+            "proc.txt.gz": {"lines": len(proc_lines), "sha256": _sha256(proc_path)},
         },
         "entities": {
             "users": len(gen.users),
@@ -483,6 +577,7 @@ def generate_fixture(out_dir: Path, spec: SyntheticSpec | None = None) -> Fixtur
             "duplicate_auth_lines": len(dup_set),
             "duplicate_redteam_records": 1,
             "unmatched_redteam_records": 1,
+            "malformed_proc_rows": 3,
         },
         "campaigns": gen.campaign_log,
         "benign_scenarios": gen.benign_log,

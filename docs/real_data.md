@@ -9,6 +9,10 @@ data. No real-data result exists until you run the steps below.
 1. Complete LANL's form at <https://csr.lanl.gov/data/cyber1/> and download `auth.txt.gz`
    (~7 GB compressed, ~1.05 billion events over 58 days) and `redteam.txt.gz`.
 2. Put both in `data/raw/lanl/`. The path is git-ignored and excluded from Docker builds.
+   Optionally also download `proc.txt.gz` and uncomment `proc: proc.txt.gz` under `lanl:` in
+   `configs/datasets.yaml`; that enables the process features and model M4. Without it M4 is
+   skipped and the Lab says why. M2 (supervised) trains only if the chosen training days hold
+   at least 30 red-team windows from 5 accounts.
    Check them before ingesting:
 
    ```bash

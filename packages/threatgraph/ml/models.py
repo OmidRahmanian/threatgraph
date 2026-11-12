@@ -1,4 +1,5 @@
-"""Model interface and the Phase 1 models (M0 robust z-score, M1 Isolation Forest).
+"""Model interface and models: M0 robust z-score, Isolation Forests (M1, M3, M4, M5) and the
+gated supervised model M2 (gradient boosting).
 
 All scores are oriented so that *higher = more anomalous*. Scores are rankings, not
 calibrated probabilities of compromise.
@@ -15,7 +16,7 @@ from typing import Any, ClassVar
 
 import joblib
 import numpy as np
-from sklearn.ensemble import IsolationForest
+from sklearn.ensemble import HistGradientBoostingClassifier, IsolationForest
 
 from threatgraph.config import ModelSpec, ThresholdPolicy
 from threatgraph.data.features import FEATURE_DESCRIPTIONS
@@ -39,6 +40,7 @@ class AnomalyModel(ABC):
     kind: ClassVar[str]
     explanation_method: ClassVar[str]
     explanation_caveat: ClassVar[str]
+    supervised: ClassVar[bool] = False
 
     def __init__(
         self, model_id: str, display_name: str, features: list[str], params: dict[str, Any]
@@ -57,13 +59,25 @@ class AnomalyModel(ABC):
         self.train_info: dict[str, Any] = {}
 
     # -- training ---------------------------------------------------------------
-    def fit(self, X: np.ndarray, *, train_info: dict[str, Any] | None = None) -> AnomalyModel:
+    def fit(
+        self,
+        X: np.ndarray,
+        *,
+        y: np.ndarray | None = None,
+        train_info: dict[str, Any] | None = None,
+    ) -> AnomalyModel:
+        """Fit on the training split. `y` (training labels) is required by supervised models
+        and refused by unsupervised ones, so labels cannot leak into an unsupervised model."""
         self._check(X)
+        if self.supervised != (y is not None):
+            raise ValueError(
+                f"{self.kind}: labels {'required' if self.supervised else 'not allowed'}"
+            )
         started = time.perf_counter()
         self.ref_median, self.ref_scale = robust_reference(
             X, float(self.params.get("min_scale", 0.0))
         )
-        self._fit(X)
+        self._fit(X, y)
         self.train_info = {
             **(train_info or {}),
             "n_train_rows": int(X.shape[0]),
@@ -150,7 +164,7 @@ class AnomalyModel(ABC):
             raise ValueError("feature matrix contains NaN/inf")
 
     @abstractmethod
-    def _fit(self, X: np.ndarray) -> None: ...
+    def _fit(self, X: np.ndarray, y: np.ndarray | None) -> None: ...
 
     @abstractmethod
     def _score(self, X: np.ndarray) -> np.ndarray: ...
@@ -171,7 +185,7 @@ class RobustZModel(AnomalyModel):
         "Reference medians/scales come from the training split and are shared by all principals."
     )
 
-    def _fit(self, X: np.ndarray) -> None:
+    def _fit(self, X: np.ndarray, y: np.ndarray | None) -> None:
         pass  # the robust reference computed in fit() is the whole model
 
     def _score(self, X: np.ndarray) -> np.ndarray:
@@ -197,7 +211,7 @@ class IsolationForestModel(AnomalyModel):
         "windows; they are not the model's internal reasons."
     )
 
-    def _fit(self, X: np.ndarray) -> None:
+    def _fit(self, X: np.ndarray, y: np.ndarray | None) -> None:
         p = self.params
         self.forest = IsolationForest(
             n_estimators=int(p.get("n_estimators", 300)),
@@ -211,9 +225,51 @@ class IsolationForestModel(AnomalyModel):
         return -self.forest.score_samples(signed_log1p(X))
 
 
+class SupervisedGBMModel(AnomalyModel):
+    """M2: gradient-boosted trees trained on the training split's red-team labels.
+
+    Unlabeled windows are treated as negatives *for fitting only* (the standard
+    positive-unlabeled shortcut, which biases the model against undocumented attacker
+    activity). Evaluation still treats unlabeled windows as unknown, exactly as for the
+    unsupervised models. Classes are re-weighted because positives are rare. Hyperparameters
+    are fixed in configs/models.yaml, never tuned on validation or test. The score is a
+    ranking; it is not a calibrated probability of compromise. Trained only when the
+    supervised gate finds enough training labels.
+    """
+
+    kind = "supervised_gbm"
+    supervised = True
+    explanation_method = (
+        "proxy: per-feature robust z-scores of the window versus the training split"
+    )
+    explanation_caveat = (
+        "Gradient boosting learns from the red-team labels of the training split; the listed "
+        "deviations describe how the window differs from typical training windows, not the "
+        "trees' internal reasons. Undocumented attacker activity was treated as negative."
+    )
+
+    def _fit(self, X: np.ndarray, y: np.ndarray | None) -> None:
+        assert y is not None
+        p = self.params
+        self.clf = HistGradientBoostingClassifier(
+            max_iter=int(p.get("max_iter", 200)),
+            learning_rate=float(p.get("learning_rate", 0.05)),
+            max_leaf_nodes=int(p.get("max_leaf_nodes", 15)),
+            min_samples_leaf=int(p.get("min_samples_leaf", 20)),
+            l2_regularization=float(p.get("l2_regularization", 1.0)),
+            class_weight="balanced",
+            early_stopping=False,
+            random_state=int(p.get("random_state", 42)),
+        ).fit(signed_log1p(X), y.astype(int))
+
+    def _score(self, X: np.ndarray) -> np.ndarray:
+        return self.clf.predict_proba(signed_log1p(X))[:, 1]
+
+
 MODEL_KINDS: dict[str, type[AnomalyModel]] = {
     RobustZModel.kind: RobustZModel,
     IsolationForestModel.kind: IsolationForestModel,
+    SupervisedGBMModel.kind: SupervisedGBMModel,
 }
 
 
