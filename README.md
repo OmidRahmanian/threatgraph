@@ -126,7 +126,7 @@ Details, the real-data-mode guarantees and a scale rehearsal: [docs/real_data.md
 | Methodology page, model cards (Markdown), comparison CSV, API latency in the site | ✅ implemented |
 | Dockerfile and Compose stack (read-only API + nginx) | ✅ implemented and verified locally; see [deployment notes](docs/deployment.md#docker) |
 | CI workflow: Python lint/types/tests, web build and browser tests | ✅ runs on every push to `main` and every pull request (badge above) |
-| Docker smoke-test CI job (research stack and live-monitoring stack) | ✅ in the CI workflow; first GitHub run pending |
+| Docker smoke-test CI job (research stack and live-monitoring stack) | ✅ [passed on GitHub](https://github.com/OmidRahmanian/threatgraph/actions/runs/43153974127) |
 | Drift monitor (API and Experiment Lab) | ✅ implemented |
 | Account cluster-bootstrap confidence intervals and paired model differences | ✅ implemented |
 | Explanation faithfulness study (feature deletion test) | ✅ implemented |
