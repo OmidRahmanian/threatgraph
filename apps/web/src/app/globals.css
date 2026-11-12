@@ -21,6 +21,12 @@
   --synthetic-ink: #6b4a00;
   --synthetic-line: #e8c46a;
   --focus: #2a78d6;
+  /* Status (live monitoring): reserved for state, always paired with an icon and a label,
+     never used for a data series. Mode-invariant steps from the dataviz reference palette. */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -80,6 +86,10 @@
   --color-synthetic-bg: var(--synthetic-bg);
   --color-synthetic-ink: var(--synthetic-ink);
   --color-synthetic-line: var(--synthetic-line);
+  --color-status-good: var(--status-good);
+  --color-status-warning: var(--status-warning);
+  --color-status-serious: var(--status-serious);
+  --color-status-critical: var(--status-critical);
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }

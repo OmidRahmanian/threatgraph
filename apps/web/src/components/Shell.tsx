@@ -13,6 +13,7 @@ const NAV = [
   { href: "/threatgraph/explorer", label: "Hour explorer" },
   { href: "/threatgraph/replay", label: "Incident replay" },
   { href: "/threatgraph/methodology", label: "Methodology" },
+  { href: "/threatgraph/live", label: "Live monitoring" },
 ] as const;
 
 function ThemeToggle() {
@@ -45,8 +46,10 @@ function ThemeToggle() {
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  // Live Monitoring Mode is separate from Research Mode: no research badge or provenance there.
+  const isLive = pathname.replace(/\/$/, "").endsWith("/threatgraph/live");
   const meta = useLoad(api.metadata, "metadata");
-  const provenance = meta.status === "ready" ? meta.data.provenance : null;
+  const provenance = meta.status === "ready" && !isLive ? meta.data.provenance : null;
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-20 border-b border-line bg-bg/90 backdrop-blur">
@@ -83,13 +86,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:py-8">{children}</main>
       <footer className="border-t border-line">
         <div className="mx-auto flex max-w-6xl flex-wrap gap-x-6 gap-y-1 px-4 py-4 text-xs text-ink-3">
-          <span>Data source: {dataSourceLabel}</span>
+          <span>{isLive ? "Live Monitoring Mode: private telemetry from your own servers" : `Research Mode · data source: ${dataSourceLabel}`}</span>
           {provenance ? (
             <span>
               Config {provenance.config_hash} · pipeline {provenance.pipeline_version}
             </span>
           ) : null}
-          <span>Historical/synthetic research data. Not live threat intelligence or live traffic.</span>
+          {isLive ? null : <span>Historical/synthetic research data. Not live threat intelligence or live traffic.</span>}
         </div>
       </footer>
     </div>
